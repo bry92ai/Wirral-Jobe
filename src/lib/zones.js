@@ -1,42 +1,87 @@
-import { distanceMiles } from './geo.js';
+import zonesRaw from '../data/wirralTaxiZones.geojson?raw';
 
-export const ZONES = [
-  // Wirral districts
-  { id: 'wallasey', name: 'Wallasey', lat: 53.423, lng: -3.035, radiusMiles: 1.5 },
-  { id: 'birkenhead', name: 'Birkenhead', lat: 53.393, lng: -3.017, radiusMiles: 1.5 },
-  { id: 'prenton', name: 'Prenton', lat: 53.373, lng: -3.035, radiusMiles: 1.2 },
-  { id: 'oxton', name: 'Oxton', lat: 53.383, lng: -3.050, radiusMiles: 1.0 },
-  { id: 'moreton', name: 'Moreton', lat: 53.403, lng: -3.113, radiusMiles: 1.5 },
-  { id: 'hoylake', name: 'Hoylake', lat: 53.390, lng: -3.180, radiusMiles: 1.5 },
-  { id: 'west_kirby', name: 'West Kirby', lat: 53.373, lng: -3.184, radiusMiles: 1.5 },
-  { id: 'heswall', name: 'Heswall', lat: 53.338, lng: -3.105, radiusMiles: 1.8 },
-  { id: 'bebington', name: 'Bebington', lat: 53.349, lng: -2.997, radiusMiles: 1.5 },
-  { id: 'bromborough', name: 'Bromborough', lat: 53.330, lng: -2.974, radiusMiles: 1.5 },
-  { id: 'port_sunlight', name: 'Port Sunlight', lat: 53.350, lng: -2.990, radiusMiles: 1.0 },
-  { id: 'new_brighton', name: 'New Brighton', lat: 53.438, lng: -3.045, radiusMiles: 1.2 },
-  { id: 'seacombe', name: 'Seacombe', lat: 53.414, lng: -3.025, radiusMiles: 1.0 },
-  { id: 'woodside', name: 'Woodside', lat: 53.397, lng: -3.010, radiusMiles: 1.0 },
-  { id: 'upton', name: 'Upton', lat: 53.383, lng: -3.100, radiusMiles: 1.5 },
-  { id: 'greasby', name: 'Greasby', lat: 53.373, lng: -3.133, radiusMiles: 1.5 },
-  { id: 'thingwall', name: 'Thingwall', lat: 53.360, lng: -3.080, radiusMiles: 1.2 },
-  { id: 'irby', name: 'Irby', lat: 53.350, lng: -3.130, radiusMiles: 1.2 },
-  { id: 'pensby', name: 'Pensby', lat: 53.340, lng: -3.100, radiusMiles: 1.2 },
-  { id: 'barnston', name: 'Barnston', lat: 53.330, lng: -3.080, radiusMiles: 1.2 },
-  // Broader zones
-  { id: 'lpool', name: 'Liverpool', lat: 53.4084, lng: -2.9916, radiusMiles: 4 },
-  { id: 'lpl_airport', name: 'Liverpool Airport', lat: 53.3331, lng: -2.8496, radiusMiles: 3 },
-  { id: 'man_airport', name: 'Manchester Airport', lat: 53.3537, lng: -2.2740, radiusMiles: 4 }
-];
+export const WIRRAL_TAXI_ZONES = JSON.parse(zonesRaw);
 
-export function getZone(lat, lng) {
-  if (lat == null || lng == null) return null;
-  for (const zone of ZONES) {
-    if (distanceMiles(lat, lng, zone.lat, zone.lng) <= zone.radiusMiles) return zone.id;
-  }
-  return null;
+export function getZoneById(zoneId) {
+  return WIRRAL_TAXI_ZONES.features.find(f => f.properties.zoneId === zoneId) || null;
 }
 
-export function getZoneName(id) {
-  const zone = ZONES.find(z => z.id === id);
-  return zone ? zone.name : id;
+export function getZoneName(zoneId) {
+  const f = getZoneById(zoneId);
+  return f ? f.properties.zoneName : zoneId || 'Unknown';
+}
+
+// Haversine distance in metres between two WGS84 points.
+function distanceMetres(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function pointInRing(lng, lat, ring) {
+  let inside = false;
+  const n = ring.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const onSegment = (lat - yi) * (xj - xi) === (lng - xi) * (yj - yi) &&
+      Math.min(xi, xj) <= lng && lng <= Math.max(xi, xj) &&
+      Math.min(yi, yj) <= lat && lat <= Math.max(yi, yj);
+    if (onSegment) return 'boundary';
+    const intersect = ((yi > lat) !== (yj > lat)) &&
+      (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function pointInPolygonGeometry(lng, lat, geometry) {
+  const type = geometry.type;
+  if (type === 'Polygon') {
+    const outer = pointInRing(lng, lat, geometry.coordinates[0]);
+    if (outer === true) {
+      for (let i = 1; i < geometry.coordinates.length; i++) {
+        if (pointInRing(lng, lat, geometry.coordinates[i])) return false;
+      }
+      return true;
+    }
+    return false;
+  }
+  if (type === 'MultiPolygon') {
+    for (const polygon of geometry.coordinates) {
+      const outer = pointInRing(lng, lat, polygon[0]);
+      if (outer !== true) continue;
+      let inHole = false;
+      for (let i = 1; i < polygon.length; i++) {
+        if (pointInRing(lng, lat, polygon[i])) { inHole = true; break; }
+      }
+      if (!inHole) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+export function findWirralZone(lat, lng, collection = WIRRAL_TAXI_ZONES) {
+  if (lat == null || lng == null) return null;
+  const matches = collection.features.filter(f => pointInPolygonGeometry(lng, lat, f.geometry));
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+
+  let best = matches[0];
+  let bestDist = Infinity;
+  for (const f of matches) {
+    const props = f.properties;
+    const d = distanceMetres(lat, lng, props.labelLat, props.labelLng);
+    if (d < bestDist - 0.001) {
+      bestDist = d;
+      best = f;
+    } else if (Math.abs(d - bestDist) < 0.001) {
+      if (props.displayOrder < best.properties.displayOrder) best = f;
+    }
+  }
+  return best;
 }

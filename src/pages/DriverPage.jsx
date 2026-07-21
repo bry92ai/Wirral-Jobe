@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { api, apiGet } from '../lib/api.js';
-import { ZONES, getZoneName } from '../lib/zones.js';
+import { WIRRAL_TAXI_ZONES, findWirralZone, getZoneName } from '../lib/zones.js';
 
 const STATUS_FLOW = ['ASSIGNED', 'ON_WAY', 'ARRIVED', 'POB', 'COMPLETE'];
 const STATUS_LABELS = {
@@ -20,7 +20,6 @@ const STATUS_ACTIONS = {
 const MAP_CENTER_DEFAULT = { lat: 53.393, lng: -3.05 };
 
 function formatCurrency(n) { return `£${Number(n || 0).toFixed(2)}`; }
-function milesToMetres(miles) { return miles * 1609.344; }
 function formatPhone(tel) {
   if (!tel) return null;
   const cleaned = tel.replace(/\s/g, '');
@@ -86,6 +85,7 @@ export default function DriverPage() {
   const [mapReady, setMapReady] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [loading, setLoading] = useState(false);
+  const [currentZoneId, setCurrentZoneId] = useState(null);
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -94,8 +94,9 @@ export default function DriverPage() {
   const offerMarkersRef = useRef([]);
   const otherDriverMarkersRef = useRef([]);
   const jobMarkersRef = useRef([]);
-  const zoneCirclesRef = useRef([]);
+  const geoJsonLayerRef = useRef(null);
   const zoneLabelsRef = useRef([]);
+  const pendingZoneRef = useRef(null);
 
   const activeJob = useMemo(() => jobs.find(j => !['COMPLETE', 'CANCELLED'].includes(j.status)), [jobs]);
 
@@ -175,24 +176,47 @@ export default function DriverPage() {
         maxZoom: 19
       }).addTo(map);
       mapObjRef.current = map;
-      setMapReady(true);
 
-      zoneCirclesRef.current = ZONES.map(zone => {
-        const circle = L.circle([zone.lat, zone.lng], {
-          radius: milesToMetres(zone.radiusMiles),
-          color: '#005eb8',
-          fillColor: '#005eb8',
-          fillOpacity: 0,
-          weight: 2.5
-        }).addTo(map);
-        L.marker([zone.lat, zone.lng], {
-          icon: L.divIcon({ className: 'zone-label', html: `<span style="color:#005eb8;font-size:12px;font-weight:800;letter-spacing:0.3px;white-space:nowrap">${zone.name}</span>`, iconSize: [140, 20], iconAnchor: [70, 10] })
-        }).addTo(map);
-        return circle;
+      const getZoneStyle = feature => ({
+        color: '#005eb8',
+        weight: currentZoneId === feature.properties.zoneId ? 3 : 1,
+        opacity: 0.7,
+        fillColor: '#005eb8',
+        fillOpacity: currentZoneId === feature.properties.zoneId ? 0.22 : 0.08
       });
+
+      geoJsonLayerRef.current = L.geoJSON(WIRRAL_TAXI_ZONES, {
+        style: getZoneStyle,
+        onEachFeature: (feature, layer) => {
+          layer.on('click', () => {
+            setCurrentZoneId(feature.properties.zoneId);
+          });
+        }
+      }).addTo(map);
+
+      zoneLabelsRef.current = WIRRAL_TAXI_ZONES.features.map(feature => {
+        const { labelLat, labelLng, zoneName } = feature.properties;
+        return L.marker([labelLat, labelLng], {
+          icon: L.divIcon({ className: 'zone-label', html: `<span style="color:#005eb8;font-size:11px;font-weight:800;letter-spacing:0.2px;white-space:nowrap;text-shadow:0 1px 2px rgba(255,255,255,0.8)">${zoneName}</span>`, iconSize: [160, 20], iconAnchor: [80, 10] })
+        }).addTo(map);
+      });
+
+      map.fitBounds(geoJsonLayerRef.current.getBounds(), { padding: [40, 40] });
+      setMapReady(true);
     }).catch(err => setError('Map failed: ' + err.message));
     return () => { mounted = false; };
   }, [loggedIn]);
+
+  useEffect(() => {
+    if (!mapReady || !geoJsonLayerRef.current) return;
+    geoJsonLayerRef.current.setStyle(feature => ({
+      color: '#005eb8',
+      weight: currentZoneId === feature.properties.zoneId ? 3 : 1,
+      opacity: 0.7,
+      fillColor: '#005eb8',
+      fillOpacity: currentZoneId === feature.properties.zoneId ? 0.22 : 0.08
+    }));
+  }, [mapReady, currentZoneId]);
 
   useEffect(() => {
     if (!mapReady || !myLocation || !LRef.current) return;
@@ -259,22 +283,50 @@ export default function DriverPage() {
     if (!loggedIn || !navigator.geolocation) return;
     setLocationError('');
     let watchId;
-    function send(position) {
-      const { latitude, longitude } = position.coords;
-      setMyLocation({ lat: latitude, lng: longitude });
-      api('driver/location', { lat: latitude, lng: longitude }, { 'x-driver-id': driverId })
+
+    function handlePosition(position) {
+      const { latitude, longitude, accuracy } = position.coords;
+      const location = { lat: latitude, lng: longitude };
+      setMyLocation(location);
+
+      const zoneFeature = findWirralZone(latitude, longitude);
+      const zoneId = zoneFeature ? zoneFeature.properties.zoneId : null;
+
+      const pending = pendingZoneRef.current;
+      if (zoneId !== currentZoneId) {
+        if (!pending || pending.zoneId !== zoneId) {
+          pendingZoneRef.current = { zoneId, since: Date.now(), readings: 1 };
+        } else {
+          pending.readings += 1;
+          const elapsed = Date.now() - pending.since;
+          if (pending.readings >= 2 || elapsed >= 20000) {
+            setCurrentZoneId(zoneId);
+            api('driver/location', { lat: latitude, lng: longitude, zone: zoneId, accuracy }, { 'x-driver-id': driverId })
+              .then(() => setLocationOk(true))
+              .catch(() => setLocationOk(false));
+            pendingZoneRef.current = null;
+            return;
+          }
+        }
+      } else {
+        pendingZoneRef.current = null;
+      }
+
+      api('driver/location', { lat: latitude, lng: longitude, zone: currentZoneId, accuracy }, { 'x-driver-id': driverId })
         .then(() => setLocationOk(true))
         .catch(() => setLocationOk(false));
     }
+
     function onGeoError() {
       setLocationError('Location access denied or unavailable. Enable location services to share your position.');
       setLocationOk(false);
     }
-    navigator.geolocation.getCurrentPosition(send, onGeoError, { enableHighAccuracy: true });
-    watchId = navigator.geolocation.watchPosition(send, onGeoError, { enableHighAccuracy: true, maximumAge: 10000 });
-    const interval = setInterval(() => navigator.geolocation.getCurrentPosition(send, onGeoError, { enableHighAccuracy: true }), 15000);
+
+    navigator.geolocation.getCurrentPosition(handlePosition, onGeoError, { enableHighAccuracy: true });
+    watchId = navigator.geolocation.watchPosition(handlePosition, onGeoError, { enableHighAccuracy: true, maximumAge: 10000 });
+    const interval = setInterval(() => navigator.geolocation.getCurrentPosition(handlePosition, onGeoError, { enableHighAccuracy: true }), 15000);
     return () => { clearInterval(interval); if (watchId != null) navigator.geolocation.clearWatch(watchId); };
-  }, [loggedIn, driverId]);
+  }, [loggedIn, driverId, currentZoneId]);
 
   if (!loggedIn) {
     return (
