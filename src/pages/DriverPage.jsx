@@ -54,19 +54,31 @@ function loadLeaflet() {
   });
 }
 
-const selfIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#005eb8" stroke="white" stroke-width="2"/></svg>`;
-const driverIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#64748b" stroke="white" stroke-width="2"/><path d="M6 12h12M12 8v8" stroke="white" stroke-width="2"/></svg>`;
 const offerIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 24"><path fill="#22c55e" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
 const pickupIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 24"><path fill="#22c55e" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
 const dropoffIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 24"><path fill="#ef4444" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
 
-function divIcon(L, svg, className = '') {
+function vehicleIconHtml(type, color, heading = null, size = 28) {
+  const isMpv = type === 'mpv';
+  const body = isMpv
+    ? `<rect x="4" y="6" width="16" height="10" rx="2" fill="${color}"/><rect x="6" y="8" width="8" height="4" rx="1" fill="rgba(255,255,255,0.25)"/><circle cx="7.5" cy="16.5" r="1.8" fill="#333"/><circle cx="16.5" cy="16.5" r="1.8" fill="#333"/><rect x="9" y="3" width="6" height="4" rx="1" fill="${color}"/>`
+    : `<rect x="5" y="6" width="14" height="9" rx="2" fill="${color}"/><rect x="7" y="8" width="6" height="3" rx="1" fill="rgba(255,255,255,0.25)"/><circle cx="7" cy="16" r="1.8" fill="#333"/><circle cx="17" cy="16" r="1.8" fill="#333"/><rect x="8" y="3" width="8" height="4" rx="1" fill="${color}"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24">${body}</svg>`;
+  const rotate = heading != null && !Number.isNaN(heading) ? `transform:rotate(${heading}deg);` : '';
+  return `<div style="width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;${rotate}">${svg}</div>`;
+}
+
+function divIcon(L, html, className = '', size = 28) {
   return L.divIcon({
     className: `custom-marker ${className}`,
-    html: svg,
-    iconSize: [28, 36],
-    iconAnchor: [14, 36]
+    html,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2]
   });
+}
+
+function vehicleIcon(L, type, color, heading = null, size = 28, className = '') {
+  return divIcon(L, vehicleIconHtml(type, color, heading, size), className, size);
 }
 
 export default function DriverPage() {
@@ -86,6 +98,7 @@ export default function DriverPage() {
   const [now, setNow] = useState(Date.now());
   const [loading, setLoading] = useState(false);
   const [currentZoneId, setCurrentZoneId] = useState(null);
+  const [heading, setHeading] = useState(null);
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -239,13 +252,18 @@ export default function DriverPage() {
     if (!mapReady || !myLocation || !LRef.current) return;
     const L = LRef.current;
     const map = mapObjRef.current;
+    const type = profile?.vehicleType || 'car';
     if (!selfMarkerRef.current) {
-      selfMarkerRef.current = L.marker([myLocation.lat, myLocation.lng], { icon: divIcon(L, selfIconSvg, 'self-marker'), zIndexOffset: 1000 }).addTo(map).bindPopup('You');
+      selfMarkerRef.current = L.marker([myLocation.lat, myLocation.lng], {
+        icon: vehicleIcon(L, type, '#005eb8', heading, 32, 'self-marker'),
+        zIndexOffset: 1000
+      }).addTo(map).bindPopup('You');
     } else {
       selfMarkerRef.current.setLatLng([myLocation.lat, myLocation.lng]);
+      selfMarkerRef.current.setIcon(vehicleIcon(L, type, '#005eb8', heading, 32, 'self-marker'));
     }
     map.panTo([myLocation.lat, myLocation.lng]);
-  }, [mapReady, myLocation]);
+  }, [mapReady, myLocation, heading, profile]);
 
   useEffect(() => {
     if (!mapReady || !LRef.current) return;
@@ -278,8 +296,10 @@ export default function DriverPage() {
     const map = mapObjRef.current;
     otherDriverMarkersRef.current.forEach(m => map.removeLayer(m));
     otherDriverMarkersRef.current = otherDrivers.filter(d => d.lastLat != null && d.lastLng != null).map(d => {
-      return L.marker([d.lastLat, d.lastLng], { icon: divIcon(L, driverIconSvg, 'driver-marker') }).addTo(map)
-        .bindPopup(`${d.id} (${d.vehicle_type})`);
+      return L.marker([d.lastLat, d.lastLng], {
+        icon: vehicleIcon(L, d.vehicle_type || 'car', '#64748b', null, 28, 'driver-marker')
+      }).addTo(map)
+        .bindPopup(`${d.id} · ${d.vehicle_type || 'car'}`);
     });
   }, [mapReady, otherDrivers]);
 
@@ -302,9 +322,10 @@ export default function DriverPage() {
     let watchId;
 
     function handlePosition(position) {
-      const { latitude, longitude, accuracy } = position.coords;
+      const { latitude, longitude, accuracy, heading: h } = position.coords;
       const location = { lat: latitude, lng: longitude };
       setMyLocation(location);
+      if (h != null && !Number.isNaN(h)) setHeading(h);
 
       const zoneFeature = findWirralZone(latitude, longitude);
       const zoneId = zoneFeature ? zoneFeature.properties.zoneId : null;
