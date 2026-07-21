@@ -150,7 +150,8 @@ function ensureDrivers() {
 function getDrivers() { ensureDrivers(); return rowsToObjects(getDriversSheet(), DRIVER_HEADERS); }
 function getAvailableDrivers() {
   return getDrivers().filter(d => d.status === 'AVAILABLE' && d.last_lat !== '' && d.last_lng !== '').map(d => ({
-    id: d.id, vehicle_type: d.vehicle_type, last_lat: Number(d.last_lat) || null, last_lng: Number(d.last_lng) || null, status: d.status
+    id: d.id, name: d.name, vehicle_type: d.vehicle_type, zone: d.zone, available_since: d.available_since || null,
+    last_lat: Number(d.last_lat) || null, last_lng: Number(d.last_lng) || null, status: d.status
   }));
 }
 function getAllDrivers() {
@@ -194,7 +195,7 @@ function getDriverMe(driverId) {
     id: d.id, name: d.name, vehicleType: d.vehicle_type, status: d.status,
     settleBalance: Number(d.settle_balance) || 0, commissionRate: Number(d.commission_rate) || 0,
     zone: d.zone, lastLat: Number(d.last_lat) || null, lastLng: Number(d.last_lng) || null,
-    lastLocationAt: d.last_location_at || null
+    lastLocationAt: d.last_location_at || null, availableSince: d.available_since || null
   };
 }
 

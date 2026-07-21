@@ -123,6 +123,17 @@ export default function DriverPage() {
 
   const activeJob = useMemo(() => jobs.find(j => !['COMPLETE', 'CANCELLED'].includes(j.status)), [jobs]);
 
+  const queueInfo = useMemo(() => {
+    const zoneId = currentZoneId || profile?.zone || null;
+    const zoneName = zoneId ? getZoneName(zoneId) : 'Outside Wirral';
+    const queue = [profile, ...otherDrivers]
+      .filter(Boolean)
+      .filter(d => d.status === 'AVAILABLE' && d.zone && d.zone === zoneId)
+      .sort((a, b) => String(a.availableSince || '9999').localeCompare(String(b.availableSince || '9999')));
+    const position = queue.findIndex(d => d.id === driverId);
+    return { zoneId, zoneName, queue, position: position >= 0 ? position + 1 : null };
+  }, [currentZoneId, profile, otherDrivers, driverId]);
+
   async function login(e) {
     e.preventDefault();
     setError(''); setLoading(true);
@@ -161,7 +172,7 @@ export default function DriverPage() {
   }
 
   async function loadOtherDrivers() {
-    try { const data = await apiGet('/drivers'); setOtherDrivers(data.drivers.filter(d => d.id !== driverId)); }
+    try { const data = await apiGet('/drivers'); setOtherDrivers(data.drivers || []); }
     catch {}
   }
 
@@ -304,12 +315,14 @@ export default function DriverPage() {
     const L = LRef.current;
     const map = mapObjRef.current;
     otherDriverMarkersRef.current.forEach(m => map.removeLayer(m));
-    otherDriverMarkersRef.current = otherDrivers.filter(d => d.lastLat != null && d.lastLng != null).map(d => {
-      return L.marker([d.lastLat, d.lastLng], {
-        icon: vehicleIcon(L, d.vehicle_type || 'car', '#64748b', null, 28, 'driver-marker')
-      }).addTo(map)
-        .bindPopup(`${d.id} · ${d.vehicle_type || 'car'}`);
-    });
+    otherDriverMarkersRef.current = otherDrivers
+      .filter(d => d.id !== driverId && d.lastLat != null && d.lastLng != null)
+      .map(d => {
+        return L.marker([d.lastLat, d.lastLng], {
+          icon: vehicleIcon(L, d.vehicle_type || 'car', '#64748b', null, 28, 'driver-marker')
+        }).addTo(map)
+          .bindPopup(`${d.id} · ${d.vehicle_type || 'car'}`);
+      });
   }, [mapReady, otherDrivers]);
 
   useEffect(() => {
@@ -438,6 +451,32 @@ export default function DriverPage() {
       )}
 
       <div ref={mapRef} style={{ flex: 1, minHeight: 0 }} />
+
+      <div style={{
+        position: 'absolute', bottom: 12, left: 12, zIndex: 1000,
+        background: 'white', borderRadius: 12, padding: '0.65rem 0.85rem',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.12)', maxWidth: 280, fontSize: '0.85rem', color: '#1f2937'
+      }}>
+        <div style={{ fontWeight: 700, color: '#005eb8', marginBottom: '0.25rem', fontSize: '0.95rem' }}>{queueInfo.zoneName}</div>
+        {queueInfo.position != null && (
+          <div style={{ marginBottom: '0.4rem' }}>Queue: <strong>#{queueInfo.position}</strong> of {queueInfo.queue.length}</div>
+        )}
+        {queueInfo.queue.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {queueInfo.queue.map((d, i) => (
+              <span key={d.id} style={{
+                padding: '2px 6px', borderRadius: 999,
+                background: d.id === driverId ? 'rgba(0,94,184,0.15)' : 'rgba(0,0,0,0.05)',
+                color: d.id === driverId ? '#005eb8' : '#4b5563',
+                fontWeight: d.id === driverId ? 700 : 400,
+                fontSize: '0.75rem'
+              }}>
+                {i + 1}. {d.id.replace(/^DRV-/, '')}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
 
       {offers.length > 0 && (
         <div style={{ position: 'absolute', top: 80, left: 12, right: 12, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'none' }}>
