@@ -19,15 +19,15 @@ export async function api(method, body = {}, extraHeaders = {}) {
   const route = '/api/' + method;
   let url, headers, reqBody;
   if (IS_GAS) {
-    url = gasUrl({ route });
-    headers = { 'Content-Type': 'text/plain' };
-    reqBody = JSON.stringify({ ...body, ...auth });
+    url = gasUrl({ route, ...body, ...auth });
+    headers = {};
+    reqBody = undefined;
   } else {
     url = API_BASE + '/api/' + method;
     headers = { 'Content-Type': 'application/json', ...extraHeaders };
     reqBody = JSON.stringify(body);
   }
-  const res = await fetch(url, { method: 'POST', headers, body: reqBody });
+  const res = await fetch(url, { method: IS_GAS ? 'GET' : 'POST', headers, body: reqBody });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;

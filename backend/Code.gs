@@ -57,6 +57,10 @@ function handleRequest(e) {
     if (e.postData && e.postData.contents) {
       try { body = JSON.parse(e.postData.contents); } catch (err) {}
     }
+    if ((!body || Object.keys(body).length === 0) && params.payload) {
+      try { body = JSON.parse(params.payload); } catch (err) {}
+    }
+    body = { ...params, ...body };
     const route = body.route || params.route || (pathInfo ? '/' + pathInfo : '') || '';
     const driverId = body.driverId || params.driverId || '';
     const adminToken = body.adminToken || params.adminToken || '';
