@@ -194,14 +194,31 @@ export default function DriverPage() {
         }
       }).addTo(map);
 
+      const labelIcon = (zoneName) => L.divIcon({
+        className: 'zone-label',
+        html: `<span style="color:#64748b;font-size:9px;font-weight:600;letter-spacing:0.2px;white-space:nowrap;background:rgba(255,255,255,0.7);padding:1px 4px;border-radius:4px">${zoneName}</span>`,
+        iconSize: [160, 16],
+        iconAnchor: [80, 8]
+      });
+
+      const showLabels = () => {
+        const zoom = map.getZoom();
+        const opacity = zoom >= 12 ? 0.9 : 0;
+        zoneLabelsRef.current.forEach(m => m.setOpacity(opacity));
+      };
+
       zoneLabelsRef.current = WIRRAL_TAXI_ZONES.features.map(feature => {
         const { labelLat, labelLng, zoneName } = feature.properties;
         return L.marker([labelLat, labelLng], {
-          icon: L.divIcon({ className: 'zone-label', html: `<span style="color:#005eb8;font-size:11px;font-weight:800;letter-spacing:0.2px;white-space:nowrap;text-shadow:0 1px 2px rgba(255,255,255,0.8)">${zoneName}</span>`, iconSize: [160, 20], iconAnchor: [80, 10] })
+          icon: labelIcon(zoneName),
+          interactive: false,
+          opacity: 0
         }).addTo(map);
       });
 
+      map.on('zoomend', showLabels);
       map.fitBounds(geoJsonLayerRef.current.getBounds(), { padding: [40, 40] });
+      setTimeout(showLabels, 0);
       setMapReady(true);
     }).catch(err => setError('Map failed: ' + err.message));
     return () => { mounted = false; };
