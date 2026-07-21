@@ -170,8 +170,8 @@ export default function DriverPage() {
       LRef.current = L;
       const start = myLocation || MAP_CENTER_DEFAULT;
       const map = L.map(mapRef.current, { zoomControl: false }).setView([start.lat, start.lng], 14);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors',
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
         maxZoom: 19
       }).addTo(map);
       mapObjRef.current = map;
@@ -182,11 +182,11 @@ export default function DriverPage() {
           radius: milesToMetres(zone.radiusMiles),
           color: '#005eb8',
           fillColor: '#005eb8',
-          fillOpacity: 0.04,
-          weight: 1.5
+          fillOpacity: 0,
+          weight: 2.5
         }).addTo(map);
-        const label = L.marker([zone.lat, zone.lng], {
-          icon: L.divIcon({ className: 'zone-label', html: `<span style="color:#005eb8;font-size:11px;font-weight:700;text-shadow:0 1px 2px white;white-space:nowrap">${zone.name}</span>`, iconSize: [120, 20], iconAnchor: [60, 10] })
+        L.marker([zone.lat, zone.lng], {
+          icon: L.divIcon({ className: 'zone-label', html: `<span style="color:#005eb8;font-size:12px;font-weight:800;letter-spacing:0.3px;white-space:nowrap">${zone.name}</span>`, iconSize: [140, 20], iconAnchor: [70, 10] })
         }).addTo(map);
         return circle;
       });
@@ -308,19 +308,22 @@ export default function DriverPage() {
     <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{
         position: 'absolute', top: 12, left: 12, right: 12, zIndex: 1000,
-        background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(6px)',
-        borderRadius: 14, padding: '0.75rem 1rem', boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+        background: 'linear-gradient(135deg, #0f172a 0%, #005eb8 100%)', color: 'white',
+        borderRadius: 16, padding: '0.85rem 1rem', boxShadow: '0 10px 28px rgba(0,0,0,0.18)',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap'
       }}>
-        <div>
-          <div style={{ fontWeight: 700 }}>{driverName || driverId}</div>
-          <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{profile ? `${getZoneName(profile.zone)} · Balance ${formatCurrency(profile.settleBalance)}` : driverId}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.1rem' }}>WF</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Wirral Flightpath</div>
+            <div style={{ fontSize: '0.75rem', opacity: 0.85 }}>{driverName || driverId} · {profile ? `${getZoneName(profile.zone)} · ${formatCurrency(profile.settleBalance)}` : driverId}</div>
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.75rem', fontWeight: 600,
             padding: '0.3rem 0.6rem', borderRadius: 999,
-            background: locationOk ? '#dcfce7' : '#fee2e2', color: locationOk ? '#166534' : '#991b1b'
+            background: locationOk ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)', color: locationOk ? '#bbf7d0' : '#fecaca'
           }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: locationOk ? '#22c55e' : '#ef4444' }} />
             {locationOk ? 'Online' : 'Loc off'}
