@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.*
+.env.local
+.env.*.local
+service-account.json
+*.sqlite
+*.db
+.DS_Store
+.netlify
