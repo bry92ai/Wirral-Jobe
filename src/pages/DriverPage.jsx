@@ -81,6 +81,16 @@ function vehicleIcon(L, type, color, heading = null, size = 28, className = '') 
   return divIcon(L, vehicleIconHtml(type, color, heading, size), className, size);
 }
 
+function headingIconHtml(color, heading = null, size = 36) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 36 36"><path d="M18 2 L26 30 L18 24 L10 30 Z" fill="${color}" stroke="white" stroke-width="2.5" stroke-linejoin="round"/><circle cx="18" cy="24" r="3" fill="white"/></svg>`;
+  const rotate = heading != null && !Number.isNaN(heading) ? `transform:rotate(${heading}deg);` : '';
+  return `<div style="width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;${rotate}">${svg}</div>`;
+}
+
+function headingIcon(L, color, heading, size = 36, className = '') {
+  return divIcon(L, headingIconHtml(color, heading, size), className, size);
+}
+
 export default function DriverPage() {
   const [driverId, setDriverId] = useState(localStorage.getItem('driverId') || '');
   const [driverName, setDriverName] = useState(localStorage.getItem('driverName') || '');
@@ -252,18 +262,17 @@ export default function DriverPage() {
     if (!mapReady || !myLocation || !LRef.current) return;
     const L = LRef.current;
     const map = mapObjRef.current;
-    const type = profile?.vehicleType || 'car';
     if (!selfMarkerRef.current) {
       selfMarkerRef.current = L.marker([myLocation.lat, myLocation.lng], {
-        icon: vehicleIcon(L, type, '#005eb8', heading, 32, 'self-marker'),
+        icon: headingIcon(L, '#005eb8', heading, 36, 'self-marker'),
         zIndexOffset: 1000
       }).addTo(map).bindPopup('You');
     } else {
       selfMarkerRef.current.setLatLng([myLocation.lat, myLocation.lng]);
-      selfMarkerRef.current.setIcon(vehicleIcon(L, type, '#005eb8', heading, 32, 'self-marker'));
+      selfMarkerRef.current.setIcon(headingIcon(L, '#005eb8', heading, 36, 'self-marker'));
     }
     map.panTo([myLocation.lat, myLocation.lng]);
-  }, [mapReady, myLocation, heading, profile]);
+  }, [mapReady, myLocation, heading]);
 
   useEffect(() => {
     if (!mapReady || !LRef.current) return;
