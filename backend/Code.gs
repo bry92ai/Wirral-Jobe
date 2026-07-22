@@ -191,8 +191,8 @@ function updateDriver(id, updates) {
 function driverLogin(body) {
   const { driverId, pin } = body || {};
   ensureDrivers();
-  const d = findDriverById(driverId);
-  if (!d || d.pin !== pin) throw new Error('Invalid driver ID or PIN');
+  const d = findDriverById(String(driverId || ''));
+  if (!d || String(d.pin) !== String(pin)) throw new Error('Invalid driver ID or PIN');
   return { ok: true, driverId: d.id, name: d.name, token: Utilities.getUuid() };
 }
 
