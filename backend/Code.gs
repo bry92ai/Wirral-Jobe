@@ -60,6 +60,7 @@ function routeRequest(route, body, params, driverId, adminToken) {
   const parts = r.split('/').filter(Boolean);
 
   if (r === 'ping') return { ok: true, time: new Date().toISOString() };
+  if (r === 'setup') return setupSeed();
   if (r === 'drivers') return { drivers: getAvailableDrivers() };
   if (r === 'booking') return createBooking(body);
   if (r === 'booking/confirm') return confirmBooking(body);
@@ -114,6 +115,14 @@ function ensureSheet(name, headers) {
 function getJobsSheet() { return ensureSheet('Jobs', JOB_HEADERS); }
 function getDriversSheet() { return ensureSheet('Drivers', DRIVER_HEADERS); }
 function getOffersSheet() { return ensureSheet('Offers', OFFER_HEADERS); }
+
+function setupSeed() {
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName('Drivers');
+  if (sheet) ss.deleteSheet(sheet);
+  ensureDrivers();
+  return { ok: true, drivers: getDrivers().map(d => ({ id: d.id, name: d.name, status: d.status })) };
+}
 
 function rowsToObjects(sheet, headers) {
   const values = sheet.getDataRange().getValues();
