@@ -545,12 +545,6 @@ function distanceMiles(lat1, lng1, lat2, lng2) {
   return R * c;
 }
 
-function getZone(lat, lng) {
-  if (lat == null || lng == null) return '';
-  for (const z of ZONES) if (distanceMiles(lat, lng, z.lat, z.lng) <= z.radiusMiles) return z.id;
-  return '';
-}
-
 function calculateAirportFare(p) {
   if (p.pickupLat == null || p.pickupLng == null || p.dropoffLat == null || p.dropoffLng == null) return null;
   for (const a of AIRPORTS) {
