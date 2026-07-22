@@ -104,8 +104,8 @@ function ensureSheet(name, headers) {
   let sheet = ss.getSheetByName(name);
   if (!sheet) {
     sheet = ss.insertSheet(name);
-    sheet.appendRow(headers);
-  } else if (sheet.getLastRow() === 0) {
+  }
+  if (sheet.getLastRow() === 0) {
     sheet.appendRow(headers);
   }
   return sheet;
