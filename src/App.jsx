@@ -3,6 +3,7 @@ import BookingPage from './pages/BookingPage.jsx';
 import TrackingPage from './pages/TrackingPage.jsx';
 import DriverPage from './pages/DriverPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 export default function App() {
   return (
@@ -26,12 +27,14 @@ export default function App() {
       </header>
 
       <main>
-        <Routes>
-          <Route path="/" element={<BookingPage />} />
-          <Route path="/track/:token" element={<TrackingPage />} />
-          <Route path="/driver" element={<DriverPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-        </Routes>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<BookingPage />} />
+            <Route path="/track/:token" element={<TrackingPage />} />
+            <Route path="/driver" element={<DriverPage />} />
+            <Route path="/admin" element={<AdminPage />} />
+          </Routes>
+        </ErrorBoundary>
       </main>
     </div>
   );

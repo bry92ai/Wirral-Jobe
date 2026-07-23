@@ -47,7 +47,7 @@ export function loadGoogleMapsScript(apiKey, timeoutMs = 15000) {
     }
 
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&libraries=places,geometry&callback=__gmLoadPromiseResolve`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&loading=async&libraries=places,geometry&callback=__gmLoadPromiseResolve`;
     script.async = true;
     script.defer = true;
     script.dataset.googleMaps = 'true';
