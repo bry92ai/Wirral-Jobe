@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { api, apiGet } from '../lib/api.js';
-import { WIRRAL_TAXI_ZONES, findWirralZone, getZoneName } from '../lib/zones.js';
+import { FLIGHTPATH_ZONES, findZone, getZoneName } from '../lib/zones.js';
 
 const STATUS_FLOW = ['ASSIGNED', 'ON_WAY', 'ARRIVED', 'POB', 'COMPLETE'];
 const STATUS_LABELS = {
@@ -18,6 +18,19 @@ const STATUS_ACTIONS = {
 };
 
 const MAP_CENTER_DEFAULT = { lat: 53.393, lng: -3.05 };
+
+function getZoneStyle(feature, currentZoneId) {
+  const external = feature.properties.external;
+  const active = currentZoneId === feature.properties.zoneId;
+  return {
+    color: external ? '#94a3b8' : '#005eb8',
+    weight: active ? 3 : 1,
+    opacity: external ? 0.5 : 0.7,
+    fillColor: external ? '#94a3b8' : '#005eb8',
+    fillOpacity: external ? 0.05 : (active ? 0.22 : 0.08),
+    dashArray: external ? '4 4' : undefined
+  };
+}
 
 function formatCurrency(n) { return `£${Number(n || 0).toFixed(2)}`; }
 function formatPhone(tel) {
@@ -211,16 +224,9 @@ export default function DriverPage() {
       }).addTo(map);
       mapObjRef.current = map;
 
-      const getZoneStyle = feature => ({
-        color: '#005eb8',
-        weight: currentZoneId === feature.properties.zoneId ? 3 : 1,
-        opacity: 0.7,
-        fillColor: '#005eb8',
-        fillOpacity: currentZoneId === feature.properties.zoneId ? 0.22 : 0.08
-      });
-
-      geoJsonLayerRef.current = L.geoJSON(WIRRAL_TAXI_ZONES, {
-        style: getZoneStyle,
+      geoJsonLayerRef.current = L.geoJSON(FLIGHTPATH_ZONES, {
+        filter: f => f.properties.zoneId !== 'international',
+        style: feature => getZoneStyle(feature, currentZoneId),
         onEachFeature: (feature, layer) => {
           layer.on('click', () => {
             setCurrentZoneId(feature.properties.zoneId);
@@ -237,21 +243,30 @@ export default function DriverPage() {
 
       const showLabels = () => {
         const zoom = map.getZoom();
-        const opacity = zoom >= 12 ? 0.9 : 0;
-        zoneLabelsRef.current.forEach(m => m.setOpacity(opacity));
+        zoneLabelsRef.current.forEach(({ marker, feature }) => {
+          const external = feature.properties.external;
+          let opacity = 0;
+          if (external) opacity = zoom <= 9 ? 0.9 : 0;
+          else opacity = zoom >= 12 ? 0.9 : 0;
+          marker.setOpacity(opacity);
+        });
       };
 
-      zoneLabelsRef.current = WIRRAL_TAXI_ZONES.features.map(feature => {
-        const { labelLat, labelLng, zoneName } = feature.properties;
-        return L.marker([labelLat, labelLng], {
-          icon: labelIcon(zoneName),
-          interactive: false,
-          opacity: 0
-        }).addTo(map);
-      });
+      zoneLabelsRef.current = FLIGHTPATH_ZONES.features
+        .filter(feature => feature.properties.zoneId !== 'international')
+        .map(feature => {
+          const { labelLat, labelLng, zoneName } = feature.properties;
+          const marker = L.marker([labelLat, labelLng], {
+            icon: labelIcon(zoneName),
+            interactive: false,
+            opacity: 0
+          }).addTo(map);
+          return { marker, feature };
+        });
 
       map.on('zoomend', showLabels);
-      map.fitBounds(geoJsonLayerRef.current.getBounds(), { padding: [40, 40] });
+      const wirralBoundsLayer = L.geoJSON(FLIGHTPATH_ZONES, { filter: f => !f.properties.external });
+      map.fitBounds(wirralBoundsLayer.getBounds(), { padding: [40, 40] });
       setTimeout(showLabels, 0);
       setMapReady(true);
     }).catch(err => setError('Map failed: ' + err.message));
@@ -260,13 +275,7 @@ export default function DriverPage() {
 
   useEffect(() => {
     if (!mapReady || !geoJsonLayerRef.current) return;
-    geoJsonLayerRef.current.setStyle(feature => ({
-      color: '#005eb8',
-      weight: currentZoneId === feature.properties.zoneId ? 3 : 1,
-      opacity: 0.7,
-      fillColor: '#005eb8',
-      fillOpacity: currentZoneId === feature.properties.zoneId ? 0.22 : 0.08
-    }));
+    geoJsonLayerRef.current.setStyle(feature => getZoneStyle(feature, currentZoneId));
   }, [mapReady, currentZoneId]);
 
   useEffect(() => {
@@ -349,7 +358,7 @@ export default function DriverPage() {
       setMyLocation(location);
       if (h != null && !Number.isNaN(h)) setHeading(h);
 
-      const zoneFeature = findWirralZone(latitude, longitude);
+      const zoneFeature = findZone(latitude, longitude);
       const zoneId = zoneFeature ? zoneFeature.properties.zoneId : null;
 
       const pending = pendingZoneRef.current;

@@ -1,4 +1,5 @@
-const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const FALLBACK_API_URL = 'https://script.google.com/macros/s/AKfycbxlBtOwnSlOTEiQvhvi_0b3lcKNCpCDD1nUxUYZwhahF16tBKUBNCkeX9yzh7Is5_WK/exec';
+const API_BASE = (import.meta.env.VITE_API_URL || FALLBACK_API_URL).replace(/\/$/, '');
 const IS_GAS = API_BASE.includes('script.google.com');
 
 function gasUrl(query = {}) {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, apiGet, apiPatch } from '../lib/api.js';
+import { loadGoogleMapsScript } from '../lib/maps.js';
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
@@ -14,6 +15,7 @@ export default function AdminPage() {
   const [editForm, setEditForm] = useState({});
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState('');
+  const [mapKey, setMapKey] = useState(0);
   const [map, setMap] = useState(null);
   const mapRef = useRef(null);
   const markersRef = useRef([]);
@@ -25,30 +27,6 @@ export default function AdminPage() {
 
   function mpvIconSvg(color) {
     return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="10" rx="2" fill="${color}"/><rect x="4" y="7" width="6" height="4" rx="1" fill="#fff" opacity="0.4"/><circle cx="6" cy="16" r="2" fill="#333"/><circle cx="18" cy="16" r="2" fill="#333"/></svg>`)}`;
-  }
-
-  function loadGoogleMapsScript(apiKey) {
-    return new Promise((resolve, reject) => {
-      if (window.google?.maps) return resolve();
-      const existing = document.querySelector('script[data-google-maps]');
-      const onLoad = () => {
-        if (window.google?.maps) return resolve();
-        reject(new Error('Google Maps failed to load'));
-      };
-      if (existing) {
-        existing.addEventListener('load', onLoad);
-        existing.addEventListener('error', () => reject(new Error('Failed to load Google Maps')));
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}`;
-      script.async = true;
-      script.defer = true;
-      script.dataset.googleMaps = 'true';
-      script.onload = onLoad;
-      script.onerror = () => reject(new Error('Failed to load Google Maps'));
-      document.head.appendChild(script);
-    });
   }
 
   async function load() {
@@ -99,10 +77,11 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!GOOGLE_MAPS_API_KEY) return;
+    setMapError('');
     loadGoogleMapsScript(GOOGLE_MAPS_API_KEY)
       .then(() => setMapReady(true))
       .catch(err => setMapError(err.message));
-  }, []);
+  }, [mapKey]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
@@ -212,7 +191,12 @@ export default function AdminPage() {
       <div className="card">
         <h1>Dispatch board</h1>
         {error && <p className="error">{error}</p>}
-        {mapError && <p className="error">Map: {mapError}</p>}
+        {mapError && (
+          <div>
+            <p className="error">Map: {mapError}</p>
+            <button type="button" onClick={() => setMapKey(k => k + 1)}>Retry map</button>
+          </div>
+        )}
         {!GOOGLE_MAPS_API_KEY && <p className="error">VITE_GOOGLE_MAPS_API_KEY not set</p>}
         <button onClick={() => { localStorage.removeItem('adminToken'); setToken(''); }}>Log out</button>
       </div>

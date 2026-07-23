@@ -462,6 +462,7 @@ function declineOffer(jobId, driverId) {
 
 function findNextQueuedDriver(pickupLat, pickupLng, excludeIds) {
   ensureDrivers();
+  excludeIds = excludeIds || [];
   const drivers = getDrivers().filter(d => d.status === 'AVAILABLE' && d.last_lat !== '' && d.last_lng !== '' && !excludeIds.includes(d.id));
   if (drivers.length === 0) return null;
   const pickupZone = getZone(pickupLat, pickupLng);

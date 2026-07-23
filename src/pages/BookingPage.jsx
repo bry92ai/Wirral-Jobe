@@ -1,97 +1,54 @@
 import { useState, useEffect, useRef } from 'react';
-import { api, apiGet } from '../lib/api.js';
+import { api } from '../lib/api.js';
+import { loadGoogleMapsScript } from '../lib/maps.js';
 import { calculateFare, calculateAirportFare, getTimeOfDay } from '../lib/fare.js';
 import { distanceMiles } from '../lib/geo.js';
-import { loadStripe } from '@stripe/stripe-js';
-import { Elements } from '@stripe/react-stripe-js';
-import PaymentForm from '../components/PaymentForm.jsx';
 
-const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
-const stripePromise = STRIPE_PUBLISHABLE_KEY ? loadStripe(STRIPE_PUBLISHABLE_KEY) : null;
-const BOOKING_FEE = 1.00;
-
+const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const DEFAULT_CENTER = { lat: 53.393, lng: -3.019 };
-
-const STEPS = [
-  { key: 'pickup', label: 'Pickup' },
-  { key: 'dropoff', label: 'Drop-off' },
-  { key: 'vehicle', label: 'Vehicle' },
-  { key: 'time', label: 'Time' },
-  { key: 'confirm', label: 'Confirm' }
+const AIRPORTS = [
+  { name: 'Liverpool John Lennon Airport (LPL)', lat: 53.3331, lng: -2.8496 },
+  { name: 'Manchester Airport (MAN)', lat: 53.3537, lng: -2.2740 }
 ];
 
-function formatDateTimeLocal(date) {
-  const pad = n => n.toString().padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function milesText(m) { return (m / 1609.344).toFixed(2); }
-function durationText(s) {
-  const min = Math.round(s / 60);
-  return min < 60 ? `${min} min` : `${Math.floor(min / 60)}h ${min % 60}m`;
-}
-function formatCurrency(n) { return `£${n.toFixed(2)}`; }
-
-function loadLeaflet() {
-  return new Promise((resolve, reject) => {
-    if (window.L) return resolve(window.L);
-    const existing = document.querySelector('script[data-leaflet-js]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve(window.L));
-      existing.addEventListener('error', () => reject(new Error('Leaflet failed')));
-      return;
-    }
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    document.head.appendChild(link);
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.async = true;
-    script.defer = true;
-    script.dataset.leafletJs = 'true';
-    script.onload = () => resolve(window.L);
-    script.onerror = () => reject(new Error('Failed to load Leaflet'));
-    document.head.appendChild(script);
-  });
-}
-
-function carIcon(color = '#005eb8') {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="7" rx="2" fill="${color}"/><rect x="5" y="5" width="8" height="4" rx="1" fill="${color}"/><circle cx="6" cy="16" r="2" fill="#333"/><circle cx="18" cy="16" r="2" fill="#333"/></svg>`;
-}
-function mpvIcon(color = '#005eb8') {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><rect x="1" y="6" width="22" height="9" rx="2" fill="${color}"/><rect x="4" y="4" width="10" height="4" rx="1" fill="${color}"/><circle cx="6" cy="15" r="2" fill="#333"/><circle cx="18" cy="15" r="2" fill="#333"/></svg>`;
-}
-function divIcon(L, html, className = '') {
-  return L.divIcon({ className: `custom-marker ${className}`, html, iconSize: [28, 28], iconAnchor: [14, 14] });
-}
-function pinIcon(color) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 24 24"><path fill="${color}" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
+function formatCurrency(n) { return `£${Number(n).toFixed(2)}`; }
+function formatPhone(tel) {
+  const cleaned = String(tel || '').replace(/\s/g, '');
+  return cleaned.startsWith('0') ? `+44${cleaned.slice(1)}` : cleaned;
 }
 
 async function nominatimSearch(query, center) {
   if (!query || query.length < 2) return [];
   const bbox = center ? `${center.lat - 0.5},${center.lng - 0.5},${center.lat + 0.5},${center.lng + 0.5}` : '';
   const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=gb&limit=8&viewbox=${bbox}&bounded=0&accept-language=en`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Search failed');
-  const data = await res.json();
-  return data.map(r => ({
-    place_id: r.place_id,
-    description: r.display_name,
-    main_text: r.name || r.display_name.split(',')[0],
-    secondary_text: r.display_name,
-    lat: Number(r.lat),
-    lng: Number(r.lon)
-  }));
+  try {
+    const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    if (!res.ok) throw new Error('Search failed');
+    const data = await res.json();
+    return data.map(r => ({
+      id: `osm-${r.osm_id || r.place_id}`,
+      source: 'nominatim',
+      main: r.name || r.display_name.split(',')[0],
+      secondary: r.display_name,
+      address: r.display_name,
+      lat: Number(r.lat),
+      lng: Number(r.lon)
+    }));
+  } catch {
+    return [];
+  }
 }
 
 async function nominatimReverse(lat, lng) {
   const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=en`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Reverse geocode failed');
-  const data = await res.json();
-  return data.display_name || 'Selected location';
+  try {
+    const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    if (!res.ok) throw new Error('Reverse geocode failed');
+    const data = await res.json();
+    return data.display_name || 'Selected location';
+  } catch {
+    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  }
 }
 
 async function osrmRoute(lat1, lng1, lat2, lng2) {
@@ -102,257 +59,539 @@ async function osrmRoute(lat1, lng1, lat2, lng2) {
     const data = await res.json();
     if (!data.routes?.[0]) throw new Error('No route');
     const r = data.routes[0];
-    return { miles: milesText(r.distance), duration: durationText(r.duration) };
+    const miles = Number((r.distance / 1609.344).toFixed(2));
+    const min = Math.round(r.duration / 60);
+    const durationText = min < 60 ? `${min} min` : `${Math.floor(min / 60)}h ${min % 60}m`;
+    return { miles, durationSec: r.duration, durationText, trafficText: 'Roads clear', trafficStatus: 'green' };
   } catch {
     const straight = distanceMiles(lat1, lng1, lat2, lng2);
-    return { miles: straight.toFixed(2), duration: '' };
+    return { miles: straight, durationSec: 0, durationText: '', trafficText: 'Route unavailable', trafficStatus: 'amber' };
   }
 }
 
-function StepBar({ step }) {
-  const activeIndex = STEPS.findIndex(s => s.key === step);
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
-      {STEPS.map((s, i) => {
-        const done = i < activeIndex;
-        const active = i === activeIndex;
-        return (
-          <div key={s.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
-            {i < STEPS.length - 1 && (
-              <div style={{ position: 'absolute', top: 14, left: '50%', width: '100%', height: 3, background: done ? '#005eb8' : '#e5e7eb', zIndex: 0 }} />
-            )}
-            <div style={{
-              width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: active || done ? '#005eb8' : '#fff', color: active || done ? '#fff' : '#9ca3af',
-              border: `2px solid ${active || done ? '#005eb8' : '#e5e7eb'}`, fontWeight: 700, fontSize: '0.8rem', zIndex: 1
-            }}>{done ? '✓' : i + 1}</div>
-            <span style={{ fontSize: '0.65rem', fontWeight: 600, marginTop: 6, color: active ? '#005eb8' : done ? '#111827' : '#9ca3af' }}>{s.label}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
+function trafficStatus(durationSec, trafficSec) {
+  const base = Math.max(1, durationSec);
+  const traffic = Math.max(base, trafficSec || base);
+  const ratio = traffic / base;
+  if (ratio <= 1.15) return { status: 'green', text: 'Clear roads' };
+  if (ratio <= 1.4) return { status: 'amber', text: 'Some traffic' };
+  return { status: 'red', text: 'Heavy traffic' };
+}
+
+function addMinutes(date, minutes) {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() + minutes);
+  return d;
+}
+
+function toIsoLocal(date) {
+  const pad = n => n.toString().padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 export default function BookingPage() {
-  const now = formatDateTimeLocal(new Date());
-  const [step, setStep] = useState('pickup');
+  const [mapReady, setMapReady] = useState(false);
+  const [mapError, setMapError] = useState('');
+  const [screen, setScreen] = useState('home');
+  const [isFuture, setIsFuture] = useState(false);
+
   const [pickup, setPickup] = useState({ address: '', lat: null, lng: null });
   const [dropoff, setDropoff] = useState({ address: '', lat: null, lng: null });
-  const [route, setRoute] = useState({ miles: '', duration: '' });
-  const [pickupTime, setPickupTime] = useState(now);
-  const [vehicleType, setVehicleType] = useState('car');
-  const [customer, setCustomer] = useState({ name: '', phone: '' });
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [mapError, setMapError] = useState('');
-  const [mapReady, setMapReady] = useState(false);
+  const [route, setRoute] = useState({ miles: 0, durationSec: 0, durationText: '', trafficText: '', trafficStatus: 'green' });
   const [routeLoading, setRouteLoading] = useState(false);
-  const [clientSecret, setClientSecret] = useState('');
-  const [bookingDraft, setBookingDraft] = useState(null);
-  const [nearbyDrivers, setNearbyDrivers] = useState([]);
-  const [mapCenter, setMapCenter] = useState(DEFAULT_CENTER);
-  const [centerAddress, setCenterAddress] = useState('');
-  const [locating, setLocating] = useState(false);
-  const [searchMode, setSearchMode] = useState(false);
-  const [searchText, setSearchText] = useState('');
+
+  const [vehicleType, setVehicleType] = useState('car');
+  const [passengers, setPassengers] = useState(1);
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [pickupTime, setPickupTime] = useState(toIsoLocal(addMinutes(new Date(), 30)));
+
+  const [query, setQuery] = useState('');
   const [predictions, setPredictions] = useState([]);
+  const [predictionsFor, setPredictionsFor] = useState('dropoff');
+  const [fetchingPredictions, setFetchingPredictions] = useState(false);
 
-  const mapContainerRef = useRef(null);
-  const LRef = useRef(null);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const [isAirport, setIsAirport] = useState(false);
+  const [airportTripType, setAirportTripType] = useState('single');
+  const [airportDirection, setAirportDirection] = useState('to');
+  const [selectedAirport, setSelectedAirport] = useState(AIRPORTS[0]);
+  const [otherLocation, setOtherLocation] = useState({ address: '', lat: null, lng: null });
+  const [returnTime, setReturnTime] = useState(toIsoLocal(addMinutes(new Date(), 60)));
+  const [returnTrip, setReturnTrip] = useState(null);
+  const [returnResult, setReturnResult] = useState(null);
+
+  const mapRef = useRef(null);
   const mapObjRef = useRef(null);
-  const driverMarkersRef = useRef([]);
-  const routeMarkersRef = useRef([]);
-  const searchRef = useRef(null);
-  const reverseTimerRef = useRef(null);
+  const pickupMarkerRef = useRef(null);
+  const dropoffMarkerRef = useRef(null);
+  const directionsRendererRef = useRef(null);
+  const trafficLayerRef = useRef(null);
+  const autocompleteServiceRef = useRef(null);
+  const placesServiceRef = useRef(null);
+  const geocoderRef = useRef(null);
+  const directionsServiceRef = useRef(null);
+  const sessionTokenRef = useRef(null);
+  const predictionDebounceRef = useRef(null);
 
-  useEffect(() => {
-    setSearchText('');
-    setPredictions([]);
-    setSearchMode(false);
-  }, [step]);
+  const oneWayCarFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'car' }) || calculateFare({ miles: route.miles, vehicleType: 'car', timeOfDay: getTimeOfDay(new Date()) })) || 0;
+  const oneWayMpvFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'mpv' }) || calculateFare({ miles: route.miles, vehicleType: 'mpv', timeOfDay: getTimeOfDay(new Date()) })) || 0;
+  const tripCount = isAirport && airportTripType === 'return' ? 2 : 1;
+  const carFare = oneWayCarFare * tripCount;
+  const mpvFare = oneWayMpvFare * tripCount;
 
   useEffect(() => {
     let mounted = true;
-    loadLeaflet()
-      .then(L => {
-        if (!mounted) return;
-        LRef.current = L;
-        const map = L.map(mapContainerRef.current, { zoomControl: true }).setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 14);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 }).addTo(map);
-        mapObjRef.current = map;
-        map.on('moveend', () => {
-          const c = map.getCenter();
-          setMapCenter({ lat: c.lat, lng: c.lng });
+    if (!GOOGLE_KEY) {
+      setMapError('Google Maps API key is missing.');
+      return;
+    }
+    loadGoogleMapsScript(GOOGLE_KEY)
+      .then(() => {
+        if (!mounted || !mapRef.current) return;
+        const google = window.google;
+        const map = new google.maps.Map(mapRef.current, {
+          center: DEFAULT_CENTER,
+          zoom: 14,
+          disableDefaultUI: true,
+          zoomControl: false,
+          fullscreenControl: false,
+          streetViewControl: false,
+          mapTypeControl: false,
+          gestureHandling: 'greedy'
         });
+        mapObjRef.current = map;
+
+        trafficLayerRef.current = new google.maps.TrafficLayer();
+        trafficLayerRef.current.setMap(map);
+
+        directionsServiceRef.current = new google.maps.DirectionsService();
+        directionsRendererRef.current = new google.maps.DirectionsRenderer({
+          map,
+          suppressMarkers: true,
+          polylineOptions: { strokeColor: '#005eb8', strokeWeight: 5, strokeOpacity: 0.9 }
+        });
+
+        pickupMarkerRef.current = new google.maps.Marker({ map, visible: false });
+        dropoffMarkerRef.current = new google.maps.Marker({ map, visible: false });
+
+        autocompleteServiceRef.current = new google.maps.places.AutocompleteService();
+        placesServiceRef.current = new google.maps.places.PlacesService(map);
+        geocoderRef.current = new google.maps.Geocoder();
+        sessionTokenRef.current = new google.maps.places.AutocompleteSessionToken();
+
         setMapReady(true);
       })
-      .catch(err => setMapError(err.message || 'Failed to load map.'));
+      .catch(err => setMapError(err.message || 'Failed to load Google Maps.'));
+
     return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
-    if (!mapReady || !LRef.current || !navigator.geolocation || pickup.lat != null) return;
-    let cancelled = false;
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(async (position) => {
-      if (cancelled) return;
-      const { latitude, longitude } = position.coords;
-      const center = { lat: latitude, lng: longitude };
-      setMapCenter(center);
-      mapObjRef.current?.panTo([latitude, longitude]);
-      try {
-        const address = await nominatimReverse(latitude, longitude);
-        setPickup({ address, lat: latitude, lng: longitude });
-        setCenterAddress(address);
-      } catch {
-        setPickup({ address: 'Current location', lat: latitude, lng: longitude });
-        setCenterAddress('Current location');
-      }
-      setLocating(false);
-    }, () => {
-      if (cancelled) return;
-      setLocating(false);
-      setError('Could not detect your location. Move the pin or search below.');
-    }, { enableHighAccuracy: true });
-    return () => { cancelled = true; };
-  }, [mapReady, pickup.lat]);
-
-  useEffect(() => {
-    if (!mapReady || !mapObjRef.current) return;
-    let cancelled = false;
-    async function loadDrivers() {
-      try {
-        const data = await apiGet('/drivers');
-        if (!cancelled) setNearbyDrivers(data.drivers || []);
-      } catch {}
-    }
-    loadDrivers();
-    const id = setInterval(loadDrivers, 5000);
-    return () => { cancelled = true; clearInterval(id); };
+    if (!mapReady || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setPickupFromLatLng(pos.coords.latitude, pos.coords.longitude),
+      () => { if (!pickup.lat) setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng); },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady]);
 
   useEffect(() => {
-    if (!mapReady || !LRef.current || !mapObjRef.current) return;
-    const L = LRef.current;
-    const map = mapObjRef.current;
-    driverMarkersRef.current.forEach(m => map.removeLayer(m));
-    driverMarkersRef.current = [];
-    nearbyDrivers.forEach(d => {
-      if (d.last_lat == null || d.last_lng == null) return;
-      const icon = divIcon(L, d.vehicle_type === 'mpv' ? mpvIcon('#005eb8') : carIcon('#005eb8'));
-      const m = L.marker([d.last_lat, d.last_lng], { icon }).addTo(map).bindPopup(`${d.id} · ${d.vehicle_type || 'car'}`);
-      driverMarkersRef.current.push(m);
-    });
-  }, [mapReady, nearbyDrivers]);
-
-  useEffect(() => {
-    if (!mapReady || !LRef.current || !mapObjRef.current) return;
-    const L = LRef.current;
-    const map = mapObjRef.current;
-    routeMarkersRef.current.forEach(m => map.removeLayer(m));
-    routeMarkersRef.current = [];
-    const markers = [];
-    const group = [];
-    if (pickup.lat != null) {
-      const m = L.marker([pickup.lat, pickup.lng], { icon: divIcon(L, pinIcon('#22c55e'), 'route-pin'), zIndexOffset: 500 }).addTo(map).bindPopup('Pickup');
-      markers.push(m); group.push([pickup.lat, pickup.lng]);
+    if (!mapReady) return;
+    const marker = pickupMarkerRef.current;
+    if (!marker) return;
+    if (pickup.lat != null && pickup.lng != null) {
+      marker.setPosition({ lat: pickup.lat, lng: pickup.lng });
+      marker.setVisible(true);
+      marker.setIcon({
+        url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 24 24"><path fill="#005eb8" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="#fff"/></svg>`
+        ),
+        scaledSize: new window.google.maps.Size(36, 44),
+        anchor: new window.google.maps.Point(18, 44)
+      });
+      if (screen === 'home') mapObjRef.current?.panTo({ lat: pickup.lat, lng: pickup.lng });
+    } else {
+      marker.setVisible(false);
     }
-    if (dropoff.lat != null) {
-      const m = L.marker([dropoff.lat, dropoff.lng], { icon: divIcon(L, pinIcon('#ef4444'), 'route-pin'), zIndexOffset: 500 }).addTo(map).bindPopup('Drop-off');
-      markers.push(m); group.push([dropoff.lat, dropoff.lng]);
-    }
-    routeMarkersRef.current = markers;
-    if (group.length > 1) map.fitBounds(group, { padding: [40, 40] });
-  }, [mapReady, pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
-
-  useEffect(() => {
-    if (!pickup.lat || !dropoff.lat) { setRoute({ miles: '', duration: '' }); return; }
-    let cancelled = false;
-    setRouteLoading(true);
-    osrmRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng).then(r => {
-      if (!cancelled) setRoute(r);
-      setRouteLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
+  }, [mapReady, pickup, screen]);
 
   useEffect(() => {
     if (!mapReady) return;
-    if (reverseTimerRef.current) clearTimeout(reverseTimerRef.current);
-    reverseTimerRef.current = setTimeout(async () => {
-      try { setCenterAddress(await nominatimReverse(mapCenter.lat, mapCenter.lng)); }
-      catch { setCenterAddress('Selected location'); }
-    }, 400);
-    return () => clearTimeout(reverseTimerRef.current);
-  }, [mapReady, mapCenter.lat, mapCenter.lng]);
-
-  async function fetchPredictions(input, anchor) {
-    if (input.length < 2) { setPredictions([]); return; }
-    try {
-      const results = await nominatimSearch(input, anchor);
-      results.sort((a, b) => {
-        if (!anchor) return 0;
-        return distanceMiles(anchor.lat, anchor.lng, a.lat, a.lng) - distanceMiles(anchor.lat, anchor.lng, b.lat, b.lng);
+    const marker = dropoffMarkerRef.current;
+    if (!marker) return;
+    if (dropoff.lat != null && dropoff.lng != null) {
+      marker.setPosition({ lat: dropoff.lat, lng: dropoff.lng });
+      marker.setVisible(true);
+      marker.setIcon({
+        url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 24 24"><path fill="#ef4444" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="#fff"/></svg>`
+        ),
+        scaledSize: new window.google.maps.Size(36, 44),
+        anchor: new window.google.maps.Point(18, 44)
       });
-      setPredictions(results);
-    } catch {
+    } else {
+      marker.setVisible(false);
+    }
+  }, [mapReady, dropoff]);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    if (pickup.lat != null && dropoff.lat != null) {
+      computeRoute();
+    } else {
+      directionsRendererRef.current?.setDirections({ routes: [] });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
+
+  function setPickupFromLatLng(lat, lng) {
+    setPickup({ address: '', lat, lng });
+    let settled = false;
+    const fallbackTimeout = setTimeout(async () => {
+      if (settled) return;
+      settled = true;
+      const address = await nominatimReverse(lat, lng);
+      setPickup({ address, lat, lng });
+    }, 2000);
+    if (geocoderRef.current) {
+      try {
+        geocoderRef.current.geocode({ location: { lat, lng } }, async (results, status) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(fallbackTimeout);
+          if (status === 'OK' && results?.[0]) {
+            setPickup({ address: results[0].formatted_address, lat, lng });
+          } else {
+            const address = await nominatimReverse(lat, lng);
+            setPickup({ address, lat, lng });
+          }
+        });
+      } catch {
+        clearTimeout(fallbackTimeout);
+        if (!settled) {
+          settled = true;
+          nominatimReverse(lat, lng).then(address => setPickup({ address, lat, lng }));
+        }
+      }
+    } else {
+      clearTimeout(fallbackTimeout);
+      nominatimReverse(lat, lng).then(address => setPickup({ address, lat, lng }));
+    }
+  }
+
+  async function computeRoute() {
+    if (!directionsServiceRef.current || !directionsRendererRef.current) {
+      const fallback = await osrmRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
+      setRoute(fallback);
+      setRouteLoading(false);
+      return;
+    }
+    setRouteLoading(true);
+    let settled = false;
+    const fallbackTimeout = setTimeout(async () => {
+      if (settled) return;
+      settled = true;
+      directionsRendererRef.current.setDirections({ routes: [] });
+      const fallback = await osrmRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
+      setRoute(fallback);
+      setRouteLoading(false);
+    }, 2500);
+    directionsServiceRef.current.route({
+      origin: { lat: pickup.lat, lng: pickup.lng },
+      destination: { lat: dropoff.lat, lng: dropoff.lng },
+      travelMode: 'DRIVING',
+      provideRouteAlternatives: false
+    }, async (res, status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(fallbackTimeout);
+      setRouteLoading(false);
+      if (status === 'OK' && res?.routes?.[0]) {
+        directionsRendererRef.current.setDirections(res);
+        const leg = res.routes[0].legs[0];
+        const miles = Number((leg.distance.value / 1609.344).toFixed(2));
+        const durationSec = leg.duration.value;
+        const trafficSec = leg.duration_in_traffic ? leg.duration_in_traffic.value : durationSec;
+        const traffic = trafficStatus(durationSec, trafficSec);
+        setRoute({
+          miles,
+          durationSec,
+          durationText: leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text,
+          trafficText: traffic.text,
+          trafficStatus: traffic.status
+        });
+        const bounds = res.routes[0].bounds;
+        if (bounds) mapObjRef.current?.fitBounds(bounds, { top: 80, right: 40, bottom: 220, left: 40 });
+      } else {
+        directionsRendererRef.current.setDirections({ routes: [] });
+        const fallback = await osrmRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
+        setRoute(fallback);
+      }
+    });
+  }
+
+  async function fetchPredictions(input) {
+    if (!input || input.length < 2) {
+      setPredictions([]);
+      return;
+    }
+    setFetchingPredictions(true);
+    const center = pickup.lat != null ? { lat: pickup.lat, lng: pickup.lng } : DEFAULT_CENTER;
+    let settled = false;
+    const fallbackTimeout = setTimeout(() => loadNominatim(), 1500);
+    function finish(list) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(fallbackTimeout);
+      setPredictions(list);
+      setFetchingPredictions(false);
+    }
+    async function loadNominatim() {
+      if (settled) return;
+      const list = await nominatimSearch(input, center);
+      finish(list);
+    }
+    if (autocompleteServiceRef.current) {
+      try {
+        autocompleteServiceRef.current.getPlacePredictions({
+          input,
+          componentRestrictions: { country: 'gb' },
+          locationBias: new window.google.maps.LatLng(center.lat, center.lng),
+          sessionToken: sessionTokenRef.current
+        }, (preds, status) => {
+          const ok = status === window.google.maps.places.PlacesServiceStatus.OK && preds?.length;
+          if (ok) {
+            finish(preds.map(p => ({
+              id: p.place_id,
+              source: 'google',
+              main: p.structured_formatting?.main_text || p.description,
+              secondary: p.structured_formatting?.secondary_text || ''
+            })));
+          } else {
+            loadNominatim();
+          }
+        });
+      } catch {
+        loadNominatim();
+      }
+    } else {
+      loadNominatim();
+    }
+  }
+
+  function onSearchChange(e) {
+    const value = e.target.value;
+    setQuery(value);
+    clearTimeout(predictionDebounceRef.current);
+    predictionDebounceRef.current = setTimeout(() => fetchPredictions(value), 250);
+  }
+
+  function selectPlace(pred) {
+    if (pred.source === 'google') {
+      if (!placesServiceRef.current) return;
+      placesServiceRef.current.getDetails({
+        placeId: pred.id,
+        fields: ['geometry', 'formatted_address', 'name'],
+        sessionToken: sessionTokenRef.current
+      }, (place, status) => {
+        if (status !== window.google.maps.places.PlacesServiceStatus.OK || !place?.geometry?.location) return;
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        const address = place.formatted_address || place.name || '';
+        sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
+        applySelection(address, lat, lng);
+      });
+    } else {
+      applySelection(pred.address, pred.lat, pred.lng);
+    }
+  }
+
+  function applySelection(address, lat, lng) {
+    if (predictionsFor === 'pickup') {
+      setPickup({ address, lat, lng });
+      setPredictionsFor('dropoff');
+      setQuery('');
+      setPredictions([]);
+      setScreen('destination');
+    } else {
+      setDropoff({ address, lat, lng });
+      setQuery('');
+      setPredictions([]);
+      setScreen('route');
+    }
+    mapObjRef.current?.panTo({ lat, lng });
+  }
+
+  function startAsap() {
+    setIsAirport(false);
+    setIsFuture(false);
+    setAirportTripType('single');
+    setReturnTrip(null);
+    setReturnResult(null);
+    setPredictionsFor('dropoff');
+    setScreen('destination');
+  }
+
+  function startFuture() {
+    setIsAirport(false);
+    setIsFuture(true);
+    setAirportTripType('single');
+    setReturnTrip(null);
+    setReturnResult(null);
+    setPickupTime(toIsoLocal(addMinutes(new Date(), 60)));
+    setPredictionsFor('dropoff');
+    setScreen('destination');
+  }
+
+  function startAirport() {
+    setIsAirport(true);
+    setIsFuture(false);
+    setAirportTripType('single');
+    setAirportDirection('to');
+    setSelectedAirport(AIRPORTS[0]);
+    setOtherLocation({ address: '', lat: null, lng: null });
+    setReturnTime(toIsoLocal(addMinutes(new Date(), 60)));
+    setReturnTrip(null);
+    setReturnResult(null);
+    setQuery('');
+    setPredictions([]);
+    setError('');
+    setScreen('airport');
+  }
+
+  function selectAirportPlace(pred) {
+    if (pred.source === 'google') {
+      if (!placesServiceRef.current) return;
+      placesServiceRef.current.getDetails({
+        placeId: pred.id,
+        fields: ['geometry', 'formatted_address', 'name'],
+        sessionToken: sessionTokenRef.current
+      }, (place, status) => {
+        if (status !== window.google.maps.places.PlacesServiceStatus.OK || !place?.geometry?.location) return;
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        const address = place.formatted_address || place.name || '';
+        sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
+        setOtherLocation({ address, lat, lng });
+        setQuery(address);
+        setPredictions([]);
+      });
+    } else {
+      setOtherLocation({ address: pred.address, lat: pred.lat, lng: pred.lng });
+      setQuery(pred.address);
       setPredictions([]);
     }
   }
 
-  function selectPrediction(p, setter) {
-    const point = { address: p.secondary_text, lat: p.lat, lng: p.lng };
-    setter(point);
-    setMapCenter({ lat: point.lat, lng: point.lng });
-    mapObjRef.current?.panTo([point.lat, point.lng]);
-    setSearchText(point.address);
-    setPredictions([]);
+  function continueAirport() {
+    if (!selectedAirport || !otherLocation.lat) {
+      setError('Please select an airport and enter the other address.');
+      return;
+    }
+    if (airportTripType === 'return' && !returnTime) {
+      setError('Please choose a return date and time.');
+      return;
+    }
+    setError('');
+    const airport = { address: selectedAirport.name, lat: selectedAirport.lat, lng: selectedAirport.lng };
+    if (airportDirection === 'to') {
+      setPickup(otherLocation);
+      setDropoff(airport);
+    } else {
+      setPickup(airport);
+      setDropoff(otherLocation);
+    }
+    if (airportTripType === 'return') {
+      setReturnTrip({ time: returnTime, airport, otherLocation, direction: airportDirection });
+    } else {
+      setReturnTrip(null);
+    }
+    setScreen('route');
   }
-
-  function confirmPickupFromPin() {
-    setPickup({ address: centerAddress || 'Selected location', lat: mapCenter.lat, lng: mapCenter.lng });
-    setSearchMode(false);
-    setStep('dropoff');
-  }
-
-  function confirmDropoffFromPin() {
-    setDropoff({ address: centerAddress || 'Selected location', lat: mapCenter.lat, lng: mapCenter.lng });
-    setStep('vehicle');
-  }
-
-  const miles = Number(route.miles) || 0;
-  const timeOfDay = getTimeOfDay(new Date(pickupTime || Date.now()));
-  const airportFare = calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType });
-  const fare = airportFare != null ? airportFare : calculateFare({ miles, vehicleType, timeOfDay });
-  const fareCar = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'car' }) || calculateFare({ miles, vehicleType: 'car', timeOfDay })) || 0;
-  const fareMpv = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'mpv' }) || calculateFare({ miles, vehicleType: 'mpv', timeOfDay })) || 0;
 
   async function submitBooking() {
-    setError(''); setLoading(true);
+    if (!customerName.trim() || !customerPhone.trim()) {
+      setError('Please enter your name and mobile number.');
+      return;
+    }
+    setError('');
+    setLoading(true);
     try {
-      const data = await api('booking', {
-        pickupAddress: pickup.address, dropoffAddress: dropoff.address,
-        pickupLat: pickup.lat, pickupLng: pickup.lng,
-        dropoffLat: dropoff.lat, dropoffLng: dropoff.lng,
-        miles, vehicleType, timeOfDay,
-        pickupTime: pickupTime ? new Date(pickupTime).toISOString() : new Date().toISOString(),
-        customerName: customer.name, customerPhone: customer.phone
+      const outbound = await api('booking', {
+        pickupAddress: pickup.address,
+        dropoffAddress: dropoff.address,
+        pickupLat: pickup.lat,
+        pickupLng: pickup.lng,
+        dropoffLat: dropoff.lat,
+        dropoffLng: dropoff.lng,
+        miles: route.miles,
+        vehicleType,
+        timeOfDay: getTimeOfDay(new Date()),
+        pickupTime: isFuture && pickupTime ? new Date(pickupTime).toISOString() : new Date().toISOString(),
+        customerName: customerName.trim(),
+        customerPhone: formatPhone(customerPhone)
       });
-      if (data.clientSecret) {
-        setBookingDraft({ jobId: data.jobId, fare: data.fare, bookingFee: data.bookingFee, trackingToken: data.trackingToken });
-        setClientSecret(data.clientSecret);
-      } else { setResult(data); }
-    } catch (err) { setError(err.message); }
-    finally { setLoading(false); }
+      if (outbound.error) throw new Error(outbound.error);
+      setResult(outbound);
+
+      if (returnTrip) {
+        const returnDate = new Date(returnTrip.time);
+        let returnPickup = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
+        let returnDropoff = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
+        if (returnTrip.direction === 'from') {
+          returnPickup = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
+          returnDropoff = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
+        }
+        const returnData = await api('booking', {
+          pickupAddress: returnPickup.address,
+          dropoffAddress: returnDropoff.address,
+          pickupLat: returnPickup.lat,
+          pickupLng: returnPickup.lng,
+          dropoffLat: returnDropoff.lat,
+          dropoffLng: returnDropoff.lng,
+          miles: route.miles,
+          vehicleType,
+          timeOfDay: getTimeOfDay(returnDate),
+          pickupTime: returnDate.toISOString(),
+          customerName: customerName.trim(),
+          customerPhone: formatPhone(customerPhone)
+        });
+        if (returnData.error) throw new Error(returnData.error);
+        setReturnResult(returnData);
+      }
+
+      setScreen('success');
+    } catch (err) {
+      setError(err.message || 'Booking failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function vehicleCard(type, label, capacity, price) {
+  function changePickup() {
+    setPredictionsFor('pickup');
+    setQuery(pickup.address);
+    setPredictions([]);
+    setScreen('pickup-search');
+  }
+
+  function backToDestination() {
+    setPredictionsFor('dropoff');
+    setQuery('');
+    setPredictions([]);
+    setScreen('destination');
+  }
+
+  function vehicleCard(type, label, capacity, fare) {
     const selected = vehicleType === type;
     return (
       <div key={type} onClick={() => setVehicleType(type)} style={{
-        flex: 1, border: selected ? '2px solid #005eb8' : '1.5px solid #e5e7eb', borderRadius: 14, padding: '1.25rem 1rem',
+        flex: 1, border: selected ? '2px solid #005eb8' : '1.5px solid #e5e7eb', borderRadius: 14, padding: '1rem 0.75rem',
         cursor: 'pointer', background: selected ? '#f0f7ff' : 'white', display: 'flex', flexDirection: 'column', alignItems: 'center',
         textAlign: 'center', transition: 'transform 0.1s, box-shadow 0.1s'
       }}>
@@ -363,192 +602,373 @@ export default function BookingPage() {
             <><rect x="2" y="8" width="20" height="7" rx="2" fill="#005eb8" /><rect x="5" y="5" width="8" height="4" rx="1" fill="#005eb8" /><circle cx="6" cy="16" r="2" fill="#333" /><circle cx="18" cy="16" r="2" fill="#333" /></>
           )}
         </svg>
-        <h3 style={{ margin: '0 0 0.25rem', fontSize: '1.1rem' }}>{label}</h3>
-        <p style={{ margin: '0 0 0.75rem', color: '#6b7280', fontSize: '0.85rem' }}>{capacity}</p>
-        <p style={{ margin: 'auto 0 0', fontSize: '1.35rem', fontWeight: 800 }}>{formatCurrency(price)}</p>
+        <h3 style={{ margin: '0 0 0.25rem', fontSize: '1rem' }}>{label}</h3>
+        <p style={{ margin: '0 0 0.5rem', color: '#6b7280', fontSize: '0.8rem' }}>{capacity}</p>
+        <p style={{ margin: 'auto 0 0', fontSize: '1.2rem', fontWeight: 800 }}>{formatCurrency(fare)}</p>
+        <p style={{ margin: '0.25rem 0 0', color: '#6b7280', fontSize: '0.7rem' }}>max chargeable</p>
       </div>
     );
   }
 
-  const predictionList = predictions.map(p => (
-    <div key={p.place_id} onClick={() => {
-      if (step === 'pickup') selectPrediction(p, (point) => { setPickup(point); setStep('dropoff'); });
-      else selectPrediction(p, (point) => { setDropoff(point); setStep('vehicle'); });
-    }} style={{ padding: '0.85rem 1rem', borderBottom: '1px solid #f3f4f6', cursor: 'pointer', background: 'white' }} onMouseEnter={e => e.currentTarget.style.background = '#f8f9fa'} onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-      <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{p.main_text}</div>
-      <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>{p.secondary_text}</div>
-    </div>
-  ));
+  function panelTitle(title) {
+    return <h2 style={{ margin: '0 0 0.75rem', fontSize: '1.2rem', fontWeight: 700 }}>{title}</h2>;
+  }
+
+  function renderScreen() {
+    switch (screen) {
+      case 'home':
+        return (
+          <div style={{ textAlign: 'center', padding: '1rem 0.5rem' }}>
+            <div style={{ marginBottom: '1.5rem' }}>
+              <div style={{
+                width: 84, height: 84, borderRadius: '50%', background: 'linear-gradient(135deg, #0f172a 0%, #005eb8 100%)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem', color: 'white'
+              }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.5-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.6A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/>
+                  <circle cx="7" cy="17" r="2"/>
+                  <circle cx="17" cy="17" r="2"/>
+                </svg>
+              </div>
+              <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 800, color: '#0f172a' }}>Wirral Flightpath</h1>
+              <p style={{ margin: '0.5rem 0 0', color: '#6b7280', fontSize: '0.95rem' }}>Local taxis, airport runs, any time.</p>
+            </div>
+            <button onClick={startAsap} style={{
+              width: '100%', padding: '1.1rem 1rem', borderRadius: 14, border: 'none', background: '#005eb8', color: 'white',
+              fontWeight: 700, fontSize: '1.1rem', marginBottom: '0.75rem', cursor: 'pointer'
+            }}>
+              <div>RIDE NOW</div>
+              <div style={{ fontWeight: 400, fontSize: '0.8rem', marginTop: '0.25rem', opacity: 0.9 }}>from current location</div>
+            </button>
+            <button onClick={startFuture} style={{
+              width: '100%', padding: '1.1rem 1rem', borderRadius: 14, border: '1.5px solid #e5e7eb', background: 'white', color: '#111827',
+              fontWeight: 600, fontSize: '1.05rem', marginBottom: '0.75rem', cursor: 'pointer'
+            }}>
+              <div>Book for later</div>
+              <div style={{ fontWeight: 400, fontSize: '0.8rem', marginTop: '0.25rem', color: '#6b7280' }}>or from a different pickup point</div>
+            </button>
+            <button onClick={startAirport} style={{
+              width: '100%', padding: '1.1rem 1rem', borderRadius: 14, border: '1.5px solid #e5e7eb', background: 'white', color: '#111827',
+              fontWeight: 600, fontSize: '1.05rem', cursor: 'pointer'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+                </svg>
+                Airport transfers
+              </div>
+              <div style={{ fontWeight: 400, fontSize: '0.8rem', marginTop: '0.25rem', color: '#6b7280' }}>single or two-way booking</div>
+            </button>
+          </div>
+        );
+
+      case 'pickup-search':
+        return (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <button onClick={backToDestination} style={{ border: 'none', background: 'none', color: '#005eb8', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+            </div>
+            {panelTitle('Change pickup location')}
+            <input
+              type="text"
+              value={query}
+              onChange={onSearchChange}
+              placeholder="Search for a pickup address"
+              style={{
+                width: '100%', padding: '0.9rem 1rem', fontSize: '1rem', borderRadius: 12, border: '1.5px solid #e5e7eb',
+                outline: 'none', marginBottom: '0.5rem'
+              }}
+              autoFocus
+            />
+            {fetchingPredictions && <p style={{ color: '#6b7280', fontSize: '0.85rem' }}>Searching…</p>}
+            <div style={{ maxHeight: 240, overflowY: 'auto', marginTop: '0.5rem' }}>
+              {predictions.map(p => (
+                <div key={p.id} onClick={() => selectPlace(p)} style={{ padding: '0.85rem 0.5rem', borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{p.main}</div>
+                  <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>{p.secondary}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case 'destination':
+        return (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <button onClick={() => setScreen('home')} style={{ border: 'none', background: 'none', color: '#005eb8', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+              {isFuture && <span style={{ fontSize: '0.8rem', color: '#005eb8', fontWeight: 600, background: '#f0f7ff', padding: '0.25rem 0.5rem', borderRadius: 8 }}>Future booking</span>}
+            </div>
+            {panelTitle('Where are you going?')}
+            <div style={{ background: '#f8fafc', borderRadius: 12, padding: '0.75rem 1rem', marginBottom: '0.75rem' }}>
+              <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Pickup</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pickup.address || 'Current location'}</div>
+                <button onClick={changePickup} style={{ border: 'none', background: 'none', color: '#005eb8', fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>Change</button>
+              </div>
+            </div>
+            <input
+              type="text"
+              value={query}
+              onChange={onSearchChange}
+              placeholder="Enter destination"
+              style={{
+                width: '100%', padding: '0.9rem 1rem', fontSize: '1rem', borderRadius: 12, border: '1.5px solid #e5e7eb',
+                outline: 'none', marginBottom: '0.5rem'
+              }}
+              autoFocus
+            />
+            {fetchingPredictions && <p style={{ color: '#6b7280', fontSize: '0.85rem' }}>Searching…</p>}
+            <div style={{ maxHeight: 220, overflowY: 'auto', marginTop: '0.5rem' }}>
+              {predictions.map(p => (
+                <div key={p.id} onClick={() => selectPlace(p)} style={{ padding: '0.85rem 0.5rem', borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{p.main}</div>
+                  <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>{p.secondary}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case 'airport':
+        return (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <button onClick={() => setScreen('home')} style={{ border: 'none', background: 'none', color: '#005eb8', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+            </div>
+            {panelTitle('Airport transfer')}
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', background: '#f8fafc', borderRadius: 12, padding: '0.35rem' }}>
+              <button onClick={() => setAirportDirection('to')} style={{ flex: 1, padding: '0.5rem', borderRadius: 10, border: 'none', background: airportDirection === 'to' ? '#005eb8' : 'transparent', color: airportDirection === 'to' ? 'white' : '#111827', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem' }}>To airport</button>
+              <button onClick={() => setAirportDirection('from')} style={{ flex: 1, padding: '0.5rem', borderRadius: 10, border: 'none', background: airportDirection === 'from' ? '#005eb8' : 'transparent', color: airportDirection === 'from' ? 'white' : '#111827', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem' }}>From airport</button>
+            </div>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: '0.35rem' }}>Airport</label>
+              <select value={selectedAirport?.name} onChange={e => setSelectedAirport(AIRPORTS.find(a => a.name === e.target.value))} style={{ width: '100%', padding: '0.9rem 1rem', fontSize: '1rem', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', background: 'white' }}>
+                {AIRPORTS.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', background: '#f8fafc', borderRadius: 12, padding: '0.35rem' }}>
+              <button onClick={() => setAirportTripType('single')} style={{ flex: 1, padding: '0.5rem', borderRadius: 10, border: 'none', background: airportTripType === 'single' ? '#005eb8' : 'transparent', color: airportTripType === 'single' ? 'white' : '#111827', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem' }}>Single</button>
+              <button onClick={() => setAirportTripType('return')} style={{ flex: 1, padding: '0.5rem', borderRadius: 10, border: 'none', background: airportTripType === 'return' ? '#005eb8' : 'transparent', color: airportTripType === 'return' ? 'white' : '#111827', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem' }}>Return</button>
+            </div>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: '0.35rem' }}>
+                {airportDirection === 'to' ? 'Pickup address' : 'Drop-off address'}
+              </label>
+              <input
+                type="text"
+                value={query}
+                onChange={onSearchChange}
+                placeholder={`Search ${airportDirection === 'to' ? 'pickup' : 'drop-off'} address`}
+                style={{
+                  width: '100%', padding: '0.9rem 1rem', fontSize: '1rem', borderRadius: 12, border: '1.5px solid #e5e7eb',
+                  outline: 'none', marginBottom: '0.5rem'
+                }}
+                autoFocus
+              />
+              {fetchingPredictions && <p style={{ color: '#6b7280', fontSize: '0.85rem' }}>Searching…</p>}
+              <div style={{ maxHeight: 160, overflowY: 'auto', marginTop: '0.5rem' }}>
+                {predictions.map(p => (
+                  <div key={p.id} onClick={() => selectAirportPlace(p)} style={{ padding: '0.85rem 0.5rem', borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{p.main}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>{p.secondary}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {airportTripType === 'return' && (
+              <div style={{ marginBottom: '0.75rem' }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: '0.35rem' }}>Return date & time</label>
+                <input
+                  type="datetime-local"
+                  value={returnTime}
+                  min={toIsoLocal(new Date())}
+                  onChange={e => setReturnTime(e.target.value)}
+                  style={{
+                    width: '100%', padding: '0.9rem 1rem', fontSize: '1rem', borderRadius: 12, border: '1.5px solid #e5e7eb',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            )}
+            {error && <p style={{ color: '#dc2626', fontSize: '0.85rem', margin: '0 0 0.75rem' }}>{error}</p>}
+            <button onClick={continueAirport} disabled={routeLoading} style={{
+              width: '100%', padding: '1rem', borderRadius: 12, border: 'none', background: '#005eb8', color: 'white',
+              fontWeight: 700, fontSize: '1rem', cursor: 'pointer', opacity: routeLoading ? 0.6 : 1
+            }}>Continue</button>
+          </div>
+        );
+
+      case 'route':
+        return (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <button onClick={() => { isAirport ? setScreen('airport') : setScreen('destination'); }} style={{ border: 'none', background: 'none', color: '#005eb8', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div style={{ flex: 1, background: '#f8fafc', borderRadius: 12, padding: '0.75rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 600 }}>DISTANCE</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{route.miles.toFixed(2)} mi</div>
+              </div>
+              <div style={{ flex: 1, background: '#f8fafc', borderRadius: 12, padding: '0.75rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 600 }}>TIME</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{route.durationText}</div>
+              </div>
+              <div style={{ flex: 1, borderRadius: 12, padding: '0.75rem', textAlign: 'center', background: route.trafficStatus === 'green' ? '#dcfce7' : route.trafficStatus === 'amber' ? '#fef9c3' : '#fee2e2' }}>
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 600 }}>TRAFFIC</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: route.trafficStatus === 'green' ? '#166534' : route.trafficStatus === 'amber' ? '#854d0e' : '#991b1b' }}>{route.trafficText}</div>
+              </div>
+            </div>
+            <p style={{ margin: '0 0 0.75rem', color: '#6b7280', fontSize: '0.9rem' }}>Pick your vehicle:</p>
+            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+              {vehicleCard('car', 'Black estate car', 'Up to 4 passengers', carFare)}
+              {vehicleCard('mpv', 'Black MPV', 'Up to 8 passengers', mpvFare)}
+            </div>
+            <button onClick={() => setScreen('details')} disabled={!vehicleType || routeLoading} style={{
+              width: '100%', padding: '1rem', borderRadius: 12, border: 'none', background: '#005eb8', color: 'white',
+              fontWeight: 700, fontSize: '1rem', cursor: 'pointer', opacity: routeLoading ? 0.6 : 1
+            }}>{routeLoading ? 'Calculating route…' : 'Continue'}</button>
+          </div>
+        );
+
+      case 'details':
+        return (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <button onClick={() => setScreen('route')} style={{ border: 'none', background: 'none', color: '#005eb8', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+              {isFuture && <span style={{ fontSize: '0.8rem', color: '#005eb8', fontWeight: 600, background: '#f0f7ff', padding: '0.25rem 0.5rem', borderRadius: 8 }}>Future booking</span>}
+            </div>
+            {panelTitle('Your details')}
+            <input
+              type="text"
+              value={customerName}
+              onChange={e => setCustomerName(e.target.value)}
+              placeholder="Your name"
+              style={{
+                width: '100%', padding: '0.9rem 1rem', fontSize: '1rem', borderRadius: 12, border: '1.5px solid #e5e7eb',
+                outline: 'none', marginBottom: '0.75rem'
+              }}
+            />
+            <input
+              type="tel"
+              value={customerPhone}
+              onChange={e => setCustomerPhone(e.target.value)}
+              placeholder="Mobile number"
+              style={{
+                width: '100%', padding: '0.9rem 1rem', fontSize: '1rem', borderRadius: 12, border: '1.5px solid #e5e7eb',
+                outline: 'none', marginBottom: '0.75rem'
+              }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8fafc', borderRadius: 12, padding: '0.75rem 1rem', marginBottom: '0.75rem' }}>
+              <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>Passengers</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <button onClick={() => setPassengers(Math.max(1, passengers - 1))} style={{ width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb', background: 'white', cursor: 'pointer' }}>-</button>
+                <span style={{ fontWeight: 700, minWidth: 20, textAlign: 'center' }}>{passengers}</span>
+                <button onClick={() => setPassengers(Math.min(vehicleType === 'mpv' ? 8 : 4, passengers + 1))} style={{ width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb', background: 'white', cursor: 'pointer' }}>+</button>
+              </div>
+            </div>
+            {isFuture && (
+              <input
+                type="datetime-local"
+                value={pickupTime}
+                min={toIsoLocal(new Date())}
+                onChange={e => setPickupTime(e.target.value)}
+                style={{
+                  width: '100%', padding: '0.9rem 1rem', fontSize: '1rem', borderRadius: 12, border: '1.5px solid #e5e7eb',
+                  outline: 'none', marginBottom: '0.75rem'
+                }}
+              />
+            )}
+            {error && <p style={{ color: '#dc2626', fontSize: '0.85rem', margin: '0 0 0.75rem' }}>{error}</p>}
+            <button onClick={submitBooking} disabled={loading} style={{
+              width: '100%', padding: '1rem', borderRadius: 12, border: 'none', background: '#005eb8', color: 'white',
+              fontWeight: 700, fontSize: '1rem', cursor: 'pointer', opacity: loading ? 0.6 : 1
+            }}>{loading ? 'Booking…' : 'Book now'}</button>
+          </div>
+        );
+
+      case 'success':
+        return (
+          <div style={{ textAlign: 'center', padding: '1rem 0.5rem' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem', fontSize: '1.75rem' }}>✓</div>
+            {panelTitle('Booking confirmed')}
+            <p style={{ color: '#6b7280', fontSize: '0.9rem', margin: '0 0 1rem' }}>
+              {isAirport && airportTripType === 'return' ? 'Both legs of your airport transfer are booked.' : (isFuture ? `Your ${vehicleType === 'mpv' ? 'MPV' : 'estate car'} is booked for ${new Date(pickupTime).toLocaleString()}.` : 'We are allocating a driver now.')}
+            </p>
+            {result && (
+              <div style={{ background: '#f8fafc', borderRadius: 12, padding: '1rem', marginBottom: '1rem', textAlign: 'left' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#6b7280' }}>{returnResult ? 'Outbound job ID' : 'Job ID'}</span>
+                  <span style={{ fontWeight: 700 }}>{result.jobId}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#6b7280' }}>{returnResult ? 'Outbound fare' : 'Fare estimate'}</span>
+                  <span style={{ fontWeight: 700 }}>{formatCurrency(result.fare)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#6b7280' }}>{returnResult ? 'Outbound booking fee' : 'Booking fee'}</span>
+                  <span style={{ fontWeight: 700 }}>{formatCurrency(result.bookingFee)}</span>
+                </div>
+              </div>
+            )}
+            {returnResult && (
+              <div style={{ background: '#f8fafc', borderRadius: 12, padding: '1rem', marginBottom: '1rem', textAlign: 'left' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#6b7280' }}>Return job ID</span>
+                  <span style={{ fontWeight: 700 }}>{returnResult.jobId}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#6b7280' }}>Return fare</span>
+                  <span style={{ fontWeight: 700 }}>{formatCurrency(returnResult.fare)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#6b7280' }}>Return booking fee</span>
+                  <span style={{ fontWeight: 700 }}>{formatCurrency(returnResult.bookingFee)}</span>
+                </div>
+              </div>
+            )}
+            <button onClick={() => window.location.reload()} style={{
+              width: '100%', padding: '1rem', borderRadius: 12, border: 'none', background: '#005eb8', color: 'white',
+              fontWeight: 700, fontSize: '1rem', cursor: 'pointer'
+            }}>Book another ride</button>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  }
 
   return (
-    <div style={{ maxWidth: 520, margin: '0 auto', background: 'white', borderRadius: 20, overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.12)' }}>
-      <div style={{ background: 'linear-gradient(135deg, #0f172a 0%, #005eb8 100%)', color: 'white', padding: '1.75rem 1.5rem 1.25rem' }}>
-        <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800 }}>Wirral Flightpath</h1>
-        <p style={{ margin: '0.25rem 0 0', opacity: 0.9, fontSize: '0.95rem' }}>Your ride, ready when you are</p>
+    <div style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden', background: '#f8fafc', fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+      <style>{`
+        .gm-err-container, .gm-err-content, .gm-err-title, .gm-err-message, .gm-err-icon, .gm-err-close, .gm-err-map {
+          display: none !important;
+        }
+      `}</style>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, padding: '1rem 1.25rem', background: 'linear-gradient(135deg, #0f172a 0%, #005eb8 100%)', color: 'white', boxShadow: '0 2px 10px rgba(0,0,0,0.15)' }}>
+        <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800 }}>Wirral Flightpath</h1>
       </div>
 
-      <div style={{ padding: '1.25rem 1.25rem 0.5rem' }}>
-        {mapError && <p className="error">{mapError}</p>}
-        {error && <p className="error">{error}</p>}
-        <StepBar step={step} />
-      </div>
+      <div ref={mapRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} />
 
-      {mapReady && !mapError && (
-        <div style={{ position: 'relative', height: 360, overflow: 'hidden' }}>
-          <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
-          <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -100%)', pointerEvents: 'none', zIndex: 500 }}>
-            <svg width="36" height="44" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="#ff6b35" />
-              <circle cx="12" cy="9" r="2.5" fill="white" />
-            </svg>
-          </div>
-          {nearbyDrivers.length > 0 && (
-            <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(255,255,255,0.95)', padding: '0.45rem 0.75rem', borderRadius: 999, fontSize: '0.75rem', fontWeight: 600, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-              {nearbyDrivers.length} nearby {nearbyDrivers.length === 1 ? 'driver' : 'drivers'}
-            </div>
-          )}
-        </div>
+      {!mapReady && !mapError && (
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 15, background: 'rgba(255,255,255,0.9)', padding: '1rem 1.5rem', borderRadius: 12, fontWeight: 600 }}>Loading map…</div>
       )}
 
-      <div style={{ padding: '1.25rem 1.5rem 1.75rem' }}>
-        {step === 'pickup' && (
-          <div>
-            <h2 style={{ marginTop: 0, fontSize: '1.25rem' }}>Where should we pick you up?</h2>
-            {locating && <p style={{ color: '#6b7280' }}>Detecting your location…</p>}
-            {!searchMode ? (
-              <>
-                <div style={{ background: '#f0f7ff', border: '1.5px solid #dbeafe', borderRadius: 14, padding: '1rem', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.75rem' }}>
-                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#22c55e' }} />
-                    <p style={{ margin: 0, fontWeight: 700, color: '#111827' }}>{pickup.address || centerAddress || 'Finding your location…'}</p>
-                  </div>
-                  <button style={{ marginTop: 0 }} onClick={() => {
-                    if (pickup.address && pickup.lat && pickup.lng) setStep('dropoff');
-                    else if (centerAddress) { setPickup({ address: centerAddress, lat: mapCenter.lat, lng: mapCenter.lng }); setStep('dropoff'); }
-                  }}>Pick up from here</button>
-                  <button className="secondary" onClick={() => setSearchMode(true)}>Search for a different pickup</button>
-                </div>
-                <p style={{ fontSize: '0.85rem', color: '#6b7280' }}>Drag the map so the pin points to your pickup spot, then tap “Pick up from here”.</p>
-              </>
-            ) : (
-              <>
-                <div className="form-group">
-                  <input ref={searchRef} value={searchText} onChange={e => { setSearchText(e.target.value); fetchPredictions(e.target.value, mapCenter); }} placeholder="Search for a pickup address" autoFocus />
-                </div>
-                {predictions.length > 0 && (
-                  <div style={{ border: '1.5px solid #e5e7eb', borderRadius: 12, overflow: 'hidden', marginBottom: '1rem', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>{predictionList}</div>
-                )}
-                <button onClick={confirmPickupFromPin}>Use pin location</button>
-                <button className="secondary" onClick={() => { setSearchMode(false); setPredictions([]); }}>Back</button>
-              </>
-            )}
-          </div>
-        )}
-
-        {step === 'dropoff' && (
-          <div>
-            <h2 style={{ marginTop: 0, fontSize: '1.25rem' }}>Where do you want to go?</h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1rem', fontSize: '0.9rem', color: '#374151' }}>
-              <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#22c55e' }} />
-              <span>From: <strong>{pickup.address}</strong></span>
+      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 20, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+        <div style={{
+          width: '100%', maxWidth: 540, background: 'white', borderRadius: '20px 20px 0 0', boxShadow: '0 -8px 30px rgba(0,0,0,0.15)',
+          padding: '1.25rem', pointerEvents: 'auto', maxHeight: '70vh', overflowY: 'auto', transition: 'transform 0.3s ease, opacity 0.3s ease'
+        }}>
+          {mapError && (
+            <div style={{ background: '#fee2e2', color: '#991b1b', borderRadius: 10, padding: '0.75rem 1rem', marginBottom: '1rem', fontSize: '0.85rem', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+              <span>{mapError}</span>
+              <button onClick={() => window.location.reload()} style={{ border: 'none', background: '#991b1b', color: 'white', borderRadius: 6, padding: '0.35rem 0.75rem', fontWeight: 600, cursor: 'pointer', fontSize: '0.8rem' }}>Retry</button>
             </div>
-            <div className="form-group">
-              <input ref={searchRef} value={searchText} onChange={e => { setSearchText(e.target.value); fetchPredictions(e.target.value, pickup); }} placeholder="Search for drop-off address" autoFocus />
-            </div>
-            {predictions.length > 0 && (
-              <div style={{ border: '1.5px solid #e5e7eb', borderRadius: 12, overflow: 'hidden', marginBottom: '1rem', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>{predictionList}</div>
-            )}
-            <div style={{ background: '#f9fafb', borderRadius: 12, padding: '0.9rem 1rem', marginBottom: '1rem', fontSize: '0.85rem', color: '#6b7280' }}>Drag the map to position the pin, then tap “Use pin location”.</div>
-            <button onClick={confirmDropoffFromPin}>Use pin location</button>
-            <button className="secondary" onClick={() => setStep('pickup')}>Back</button>
-            {routeLoading && <p style={{ color: '#6b7280' }}>Calculating route…</p>}
-            {route.miles && <div style={{ background: '#f0f7ff', borderRadius: 12, padding: '0.9rem 1rem', marginTop: '1rem', fontWeight: 700 }}>{route.miles} miles · {route.duration}</div>}
-          </div>
-        )}
-
-        {step === 'vehicle' && (
-          <div>
-            <h2 style={{ marginTop: 0, fontSize: '1.25rem' }}>Choose your ride</h2>
-            <div className="row" style={{ gap: '1rem', marginBottom: '1.25rem' }}>
-              {vehicleCard('car', 'Car', 'Up to 4 passengers', fareCar)}
-              {vehicleCard('mpv', 'MPV', 'Up to 6 passengers', fareMpv)}
-            </div>
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <button className="secondary" onClick={() => setStep('dropoff')}>Back</button>
-              <button onClick={() => setStep('time')}>Next: Pickup time</button>
-            </div>
-          </div>
-        )}
-
-        {step === 'time' && (
-          <div>
-            <h2 style={{ marginTop: 0, fontSize: '1.25rem' }}>When do you need it?</h2>
-            <div className="row" style={{ gap: '1rem', marginBottom: '1.25rem' }}>
-              <div onClick={() => setPickupTime(formatDateTimeLocal(new Date()))} style={{ flex: 1, textAlign: 'center', padding: '1rem', borderRadius: 12, border: pickupTime === now ? '2px solid #005eb8' : '1.5px solid #e5e7eb', cursor: 'pointer', background: pickupTime === now ? '#f0f7ff' : 'white' }}>
-                <h3 style={{ margin: 0, fontSize: '1rem' }}>Now</h3>
-              </div>
-              <div style={{ flex: 2 }}>
-                <label>Schedule</label>
-                <input type="datetime-local" min={now} value={pickupTime} onChange={e => setPickupTime(e.target.value)} />
-              </div>
-            </div>
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <button className="secondary" onClick={() => setStep('vehicle')}>Back</button>
-              <button onClick={() => setStep('confirm')}>Next: Confirm</button>
-            </div>
-          </div>
-        )}
-
-        {step === 'confirm' && (
-          <div>
-            <h2 style={{ marginTop: 0, fontSize: '1.25rem' }}>Confirm your ride</h2>
-            <div style={{ background: '#f9fafb', borderRadius: 14, padding: '1rem', marginBottom: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: '0.5rem' }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#22c55e', marginTop: 6 }} />
-                <div><div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Pickup</div><div style={{ fontWeight: 600 }}>{pickup.address}</div></div>
-              </div>
-              <div style={{ width: 2, height: 20, background: '#e5e7eb', marginLeft: 4, marginBottom: 4 }} />
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ef4444', marginTop: 6 }} />
-                <div><div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Drop-off</div><div style={{ fontWeight: 600 }}>{dropoff.address}</div></div>
-              </div>
-              <p style={{ margin: '0.75rem 0 0', fontSize: '0.9rem', color: '#6b7280' }}>{vehicleType === 'mpv' ? 'MPV' : 'Car'} · {route.miles} miles · {route.duration}</p>
-              <p style={{ margin: '0.25rem 0 0', fontSize: '0.9rem', color: '#6b7280' }}>Pickup: {new Date(pickupTime).toLocaleString()}</p>
-            </div>
-            <div style={{ background: '#f0f7ff', borderRadius: 14, padding: '1rem', marginBottom: '1rem' }}>
-              <div className="row" style={{ justifyContent: 'space-between', marginBottom: 4 }}><span style={{ color: '#374151' }}>Estimated fare</span><strong>{formatCurrency(fare)}</strong></div>
-              <div className="row" style={{ justifyContent: 'space-between', marginBottom: 4, fontSize: '0.9rem', color: '#6b7280' }}><span>Booking fee (pay now)</span><span>{formatCurrency(BOOKING_FEE)}</span></div>
-              <div style={{ height: 1, background: '#dbeafe', margin: '0.75rem 0' }} />
-              <div className="row" style={{ justifyContent: 'space-between', fontSize: '1.1rem' }}><span style={{ fontWeight: 700 }}>Total</span><strong>{formatCurrency(fare + BOOKING_FEE)}</strong></div>
-            </div>
-            <div className="row" style={{ marginBottom: '1rem' }}>
-              <div className="form-group"><label>Full name</label><input required value={customer.name} onChange={e => setCustomer(prev => ({ ...prev, name: e.target.value }))} placeholder="John Smith" /></div>
-              <div className="form-group"><label>Phone</label><input required type="tel" value={customer.phone} onChange={e => setCustomer(prev => ({ ...prev, phone: e.target.value }))} placeholder="07700111222" /></div>
-            </div>
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <button className="secondary" onClick={() => setStep('time')}>Back</button>
-              <button onClick={submitBooking} disabled={!customer.name.trim() || !customer.phone.trim() || loading}>{loading ? 'Booking…' : 'Book now'}</button>
-            </div>
-          </div>
-        )}
-
-        {clientSecret && bookingDraft && stripePromise && (
-          <div style={{ marginTop: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.1rem' }}>Pay booking fee</h2>
-            <Elements stripe={stripePromise} options={{ clientSecret }}>
-              <PaymentForm clientSecret={clientSecret} jobId={bookingDraft.jobId} fare={bookingDraft.fare} bookingFee={bookingDraft.bookingFee} onSuccess={setResult} onError={setError} />
-            </Elements>
-          </div>
-        )}
-        {clientSecret && !stripePromise && <p className="error">Stripe publishable key is missing. Payment cannot be collected.</p>}
-
-        {result && (
-          <div className="success" style={{ marginTop: '1.5rem', padding: '1rem', background: '#f0fdf4', borderRadius: 12 }}>
-            <p style={{ margin: '0 0 0.25rem' }}>Booked! Reference: <strong>{result.jobId}</strong></p>
-            <p style={{ margin: '0 0 0.25rem' }}>Fare: {formatCurrency(result.fare)}</p>
-            <p style={{ margin: 0 }}>Track: <a href={`/track/${result.trackingToken}`}>/track/{result.trackingToken}</a></p>
-          </div>
-        )}
+          )}
+          {renderScreen()}
+        </div>
       </div>
     </div>
   );

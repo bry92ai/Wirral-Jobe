@@ -1,9 +1,9 @@
-import zonesRaw from '../data/wirralTaxiZones.geojson?raw';
+import zonesRaw from '../data/flightpathZones.geojson?raw';
 
-export const WIRRAL_TAXI_ZONES = JSON.parse(zonesRaw);
+export const FLIGHTPATH_ZONES = JSON.parse(zonesRaw);
 
 export function getZoneById(zoneId) {
-  return WIRRAL_TAXI_ZONES.features.find(f => f.properties.zoneId === zoneId) || null;
+  return FLIGHTPATH_ZONES.features.find(f => f.properties.zoneId === zoneId) || null;
 }
 
 export function getZoneName(zoneId) {
@@ -65,7 +65,7 @@ function pointInPolygonGeometry(lng, lat, geometry) {
   return false;
 }
 
-export function findWirralZone(lat, lng, collection = WIRRAL_TAXI_ZONES) {
+export function findZone(lat, lng, collection = FLIGHTPATH_ZONES) {
   if (lat == null || lng == null) return null;
   const matches = collection.features.filter(f => pointInPolygonGeometry(lng, lat, f.geometry));
   if (matches.length === 0) return null;
@@ -85,3 +85,5 @@ export function findWirralZone(lat, lng, collection = WIRRAL_TAXI_ZONES) {
   }
   return best;
 }
+
+export const findWirralZone = findZone;

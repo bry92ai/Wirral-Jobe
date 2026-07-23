@@ -39,6 +39,7 @@
     "@turf/unkink-polygon": "^7.3.5",
     "@vitejs/plugin-react": "^4.3.0",
     "concurrently": "^8.2.2",
+    "playwright": "^1.61.1",
     "vite": "^5.3.0"
   },
   "allowScripts": {
