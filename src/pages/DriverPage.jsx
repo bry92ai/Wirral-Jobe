@@ -127,6 +127,7 @@ export default function DriverPage() {
   const [myBids, setMyBids] = useState([]);
   const [futureBookings, setFutureBookings] = useState([]);
   const [bidAmounts, setBidAmounts] = useState({});
+  const [followMe, setFollowMe] = useState(true);
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -230,6 +231,12 @@ export default function DriverPage() {
     finally { setLoading(false); }
   }
 
+  function recenterMap() {
+    setFollowMe(true);
+    const map = mapObjRef.current;
+    if (map && myLocation) map.panTo([myLocation.lat, myLocation.lng]);
+  }
+
   async function acceptOffer(jobId) {
     setLoading(true);
     try {
@@ -306,6 +313,7 @@ export default function DriverPage() {
         });
 
       map.on('zoomend', showLabels);
+      map.on('dragstart', () => setFollowMe(false));
       const wirralBoundsLayer = L.geoJSON(FLIGHTPATH_ZONES, { filter: f => !f.properties.external });
       map.fitBounds(wirralBoundsLayer.getBounds(), { padding: [40, 40] });
       setTimeout(showLabels, 0);
@@ -332,8 +340,8 @@ export default function DriverPage() {
       selfMarkerRef.current.setLatLng([myLocation.lat, myLocation.lng]);
       selfMarkerRef.current.setIcon(headingIcon(L, '#005eb8', heading, 36, 'self-marker'));
     }
-    map.panTo([myLocation.lat, myLocation.lng]);
-  }, [mapReady, myLocation, heading]);
+    if (followMe) map.panTo([myLocation.lat, myLocation.lng]);
+  }, [mapReady, myLocation, heading, followMe]);
 
   useEffect(() => {
     if (!mapReady || !LRef.current) return;
@@ -677,6 +685,27 @@ export default function DriverPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {myLocation && (
+        <button
+          onClick={recenterMap}
+          style={{
+            position: 'absolute', bottom: 18, right: 18, zIndex: 1100,
+            width: 44, height: 44, borderRadius: '50%',
+            background: 'white', color: '#005eb8',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 0, margin: 0,
+            border: `2px solid ${followMe ? '#005eb8' : '#e5e7eb'}`
+          }}
+          title="Re-centre on my location"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2M12 20v2M2 12h2M20 12h2" />
+          </svg>
+        </button>
       )}
     </div>
   );
