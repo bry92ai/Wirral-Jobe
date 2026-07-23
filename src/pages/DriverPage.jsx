@@ -19,15 +19,16 @@ const STATUS_ACTIONS = {
 
 const MAP_CENTER_DEFAULT = { lat: 53.393, lng: -3.05 };
 
-function getZoneStyle(feature, currentZoneId) {
+function getZoneStyle(feature, currentZoneId, selectedZoneId) {
   const external = feature.properties.external;
   const active = currentZoneId === feature.properties.zoneId;
+  const selected = selectedZoneId === feature.properties.zoneId;
   return {
-    color: external ? '#94a3b8' : '#005eb8',
-    weight: active ? 3 : 1,
-    opacity: external ? 0.5 : 0.7,
-    fillColor: external ? '#94a3b8' : '#005eb8',
-    fillOpacity: external ? 0.05 : (active ? 0.22 : 0.08),
+    color: external ? '#94a3b8' : (selected ? '#0ea5e9' : '#005eb8'),
+    weight: selected ? 4 : (active ? 3 : 1),
+    opacity: external ? 0.5 : 0.8,
+    fillColor: external ? '#94a3b8' : (selected ? '#0ea5e9' : '#005eb8'),
+    fillOpacity: external ? 0.05 : (selected ? 0.3 : (active ? 0.22 : 0.08)),
     dashArray: external ? '4 4' : undefined
   };
 }
@@ -128,6 +129,7 @@ export default function DriverPage() {
   const [futureBookings, setFutureBookings] = useState([]);
   const [bidAmounts, setBidAmounts] = useState({});
   const [followMe, setFollowMe] = useState(true);
+  const [selectedZoneId, setSelectedZoneId] = useState(null);
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -152,6 +154,26 @@ export default function DriverPage() {
     const position = queue.findIndex(d => d.id === driverId);
     return { zoneId, zoneName, queue, position: position >= 0 ? position + 1 : null };
   }, [currentZoneId, profile, otherDrivers, driverId]);
+
+  const zonePanelInfo = useMemo(() => {
+    if (!selectedZoneId) return null;
+    const zoneName = getZoneName(selectedZoneId);
+    const queue = [profile, ...otherDrivers]
+      .filter(Boolean)
+      .filter(d => d.status === 'AVAILABLE' && d.zone && d.zone === selectedZoneId)
+      .sort((a, b) => String(a.availableSince || '9999').localeCompare(String(b.availableSince || '9999')));
+    const inZone = (job) => {
+      const z = findZone(job.pickupLat, job.pickupLng);
+      return z && z.properties.zoneId === selectedZoneId;
+    };
+    return {
+      zoneId: selectedZoneId,
+      zoneName,
+      queue,
+      bids: bidBoard.filter(inZone),
+      futures: futureBookings.filter(inZone)
+    };
+  }, [selectedZoneId, profile, otherDrivers, bidBoard, futureBookings]);
 
   async function login(e) {
     e.preventDefault();
@@ -274,10 +296,10 @@ export default function DriverPage() {
 
       geoJsonLayerRef.current = L.geoJSON(FLIGHTPATH_ZONES, {
         filter: f => f.properties.zoneId !== 'international',
-        style: feature => getZoneStyle(feature, currentZoneId),
+        style: feature => getZoneStyle(feature, currentZoneId, selectedZoneId),
         onEachFeature: (feature, layer) => {
           layer.on('click', () => {
-            setCurrentZoneId(feature.properties.zoneId);
+            setSelectedZoneId(feature.properties.zoneId);
           });
         }
       }).addTo(map);
@@ -324,8 +346,8 @@ export default function DriverPage() {
 
   useEffect(() => {
     if (!mapReady || !geoJsonLayerRef.current) return;
-    geoJsonLayerRef.current.setStyle(feature => getZoneStyle(feature, currentZoneId));
-  }, [mapReady, currentZoneId]);
+    geoJsonLayerRef.current.setStyle(feature => getZoneStyle(feature, currentZoneId, selectedZoneId));
+  }, [mapReady, currentZoneId, selectedZoneId]);
 
   useEffect(() => {
     if (!mapReady || !myLocation || !LRef.current) return;
@@ -683,6 +705,60 @@ export default function DriverPage() {
                 </>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {selectedZoneId && zonePanelInfo && (
+        <div style={{
+          position: 'absolute', bottom: 80, left: 12, right: 12, zIndex: 1100,
+          background: 'white', borderRadius: 16, padding: '1rem',
+          boxShadow: '0 8px 30px rgba(0,0,0,0.18)', maxHeight: '55%', overflowY: 'auto'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{zonePanelInfo.zoneName}</h2>
+            <button className="secondary" onClick={() => setSelectedZoneId(null)} style={{ width: 'auto', margin: 0, padding: '0.35rem 0.7rem', fontSize: '0.8rem' }}>Close</button>
+          </div>
+
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.35rem' }}>Queue ({zonePanelInfo.queue.length})</div>
+            {zonePanelInfo.queue.length === 0 && <p style={{ color: '#6b7280', fontSize: '0.85rem', margin: 0 }}>No drivers queued.</p>}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {zonePanelInfo.queue.map((d, i) => (
+                <span key={d.id} style={{
+                  padding: '3px 7px', borderRadius: 999,
+                  background: d.id === driverId ? 'rgba(0,94,184,0.15)' : 'rgba(0,0,0,0.05)',
+                  color: d.id === driverId ? '#005eb8' : '#4b5563',
+                  fontWeight: d.id === driverId ? 700 : 400,
+                  fontSize: '0.8rem'
+                }}>
+                  {i + 1}. {d.id.replace(/^DRV-/, '')}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.35rem' }}>Open bids ({zonePanelInfo.bids.length})</div>
+            {zonePanelInfo.bids.length === 0 && <p style={{ color: '#6b7280', fontSize: '0.85rem', margin: 0 }}>No open bids in this zone.</p>}
+            {zonePanelInfo.bids.map(job => (
+              <div key={job.jobId} className="card" style={{ padding: '0.65rem', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                <div style={{ fontWeight: 600 }}>{formatCurrency(job.fare)} · {job.vehicleType?.toUpperCase()}</div>
+                <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>{job.pickupAddress} → {job.dropoffAddress}</div>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.35rem' }}>Future bookings ({zonePanelInfo.futures.length})</div>
+            {zonePanelInfo.futures.length === 0 && <p style={{ color: '#6b7280', fontSize: '0.85rem', margin: 0 }}>No future bookings in this zone.</p>}
+            {zonePanelInfo.futures.map(job => (
+              <div key={job.jobId} className="card" style={{ padding: '0.65rem', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                <div style={{ fontWeight: 600 }}>{new Date(job.pickupTime).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>{job.pickupAddress} → {job.dropoffAddress}</div>
+                <div style={{ fontWeight: 700 }}>{formatCurrency(job.fare)}</div>
+              </div>
+            ))}
           </div>
         </div>
       )}
