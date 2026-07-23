@@ -7,11 +7,24 @@ import AdminPage from './pages/AdminPage.jsx';
 export default function App() {
   return (
     <div className="app">
-      <nav className="nav">
-        <Link to="/">Book</Link>
-        <Link to="/driver">Driver</Link>
-        <Link to="/admin">Dispatch</Link>
-      </nav>
+      <header className="app-header">
+        <div className="brandbar">
+          <img src="/design-refs/logo.jpg" alt="The Wirral Jobe" />
+          <div className="brandbar-copy">
+            <div className="brandbar-kicker">Wirral taxi app</div>
+            <p className="brandbar-title">Local knowledge. Always on call.</p>
+            <p className="brandbar-subtitle">
+              Bold poster-style branding for booking, driver tracking and dispatch.
+            </p>
+          </div>
+        </div>
+        <nav className="nav">
+          <Link to="/">Customer</Link>
+          <Link to="/driver">Driver</Link>
+          <Link to="/admin">Dispatch</Link>
+        </nav>
+      </header>
+
       <main>
         <Routes>
           <Route path="/" element={<BookingPage />} />
