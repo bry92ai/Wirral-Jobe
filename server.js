@@ -71,6 +71,16 @@ db.exec(`
     settle_balance REAL DEFAULT 0,
     status TEXT DEFAULT 'AVAILABLE'
   );
+
+  CREATE TABLE IF NOT EXISTS bids (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    driver_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    status TEXT DEFAULT 'PENDING',
+    created_at TEXT,
+    FOREIGN KEY (job_id) REFERENCES jobs(id)
+  );
 `);
 
 const seedDrivers = [
@@ -478,6 +488,75 @@ app.post('/api/driver/jobs/:jobId/status', (req, res) => {
   res.json({ ok: true, status });
 });
 
+app.get('/api/driver/bid-board', (req, res) => {
+  const driverId = req.headers['x-driver-id'];
+  if (!driverId) return res.status(401).json({ error: 'No driver ID' });
+  const rows = db.prepare('SELECT * FROM jobs WHERE status = ? ORDER BY created_at DESC').all('NEW');
+  const jobs = rows.map(jobResponse).map(j => {
+    const myBid = db.prepare('SELECT * FROM bids WHERE job_id = ? AND driver_id = ?').get(j.jobId, driverId);
+    return { ...j, myBid: myBid ? buildBidResponse(myBid) : null };
+  });
+  res.json({ jobs });
+});
+
+app.post('/api/driver/bid-board/:jobId/bid', (req, res) => {
+  const driverId = req.headers['x-driver-id'];
+  if (!driverId) return res.status(401).json({ error: 'No driver ID' });
+  const { jobId } = req.params;
+  const { amount } = req.body;
+  if (amount == null || Number(amount) <= 0) return res.status(400).json({ error: 'Invalid bid amount' });
+  const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  if (job.status !== 'NEW') return res.status(400).json({ error: 'Job is no longer open for bidding' });
+  const driver = db.prepare('SELECT * FROM drivers WHERE id = ?').get(driverId);
+  if (!driver) return res.status(404).json({ error: 'Driver not found' });
+  const existing = db.prepare('SELECT * FROM bids WHERE job_id = ? AND driver_id = ?').get(jobId, driverId);
+  const bidId = existing ? existing.id : `BID-${uuid()}`;
+  const now = new Date().toISOString();
+  if (existing) {
+    db.prepare('UPDATE bids SET amount = ?, status = ?, created_at = ? WHERE id = ?').run(Number(amount), 'PENDING', now, bidId);
+  } else {
+    db.prepare('INSERT INTO bids (id, job_id, driver_id, amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(bidId, jobId, driverId, Number(amount), 'PENDING', now);
+  }
+  res.json({ ok: true, bidId });
+});
+
+app.get('/api/driver/my-bids', (req, res) => {
+  const driverId = req.headers['x-driver-id'];
+  if (!driverId) return res.status(401).json({ error: 'No driver ID' });
+  const rows = db.prepare('SELECT * FROM bids WHERE driver_id = ? ORDER BY created_at DESC').all(driverId);
+  res.json({ bids: rows.map(buildBidResponse) });
+});
+
+app.get('/api/driver/future-bookings', (req, res) => {
+  const driverId = req.headers['x-driver-id'];
+  if (!driverId) return res.status(401).json({ error: 'No driver ID' });
+  const cutoff = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const rows = db.prepare('SELECT * FROM jobs WHERE pickup_time > ? AND status IN (?, ?) AND (driver_id IS NULL OR driver_id = ?) ORDER BY pickup_time ASC')
+    .all(cutoff, 'NEW', 'ASSIGNED', driverId);
+  res.json({ jobs: rows.map(jobResponse) });
+});
+
+app.post('/api/driver/future-bookings/:jobId/accept', (req, res) => {
+  const driverId = req.headers['x-driver-id'];
+  if (!driverId) return res.status(401).json({ error: 'No driver ID' });
+  const { jobId } = req.params;
+  const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  const driver = db.prepare('SELECT * FROM drivers WHERE id = ?').get(driverId);
+  if (!driver) return res.status(404).json({ error: 'Driver not found' });
+  if (job.status !== 'NEW') return res.status(400).json({ error: 'Job is no longer available' });
+  db.prepare('UPDATE jobs SET status = ?, driver_id = ?, commission_rate = ? WHERE id = ?')
+    .run('ASSIGNED', driverId, driver.commission_rate || 0, jobId);
+  db.prepare('UPDATE drivers SET status = ? WHERE id = ?').run('BUSY', driverId);
+  cancelOffer(jobId);
+  syncJobToSheet(jobId);
+  syncDriverToSheet(driverId);
+  sendSmsStub(job.customer_phone, `Driver ${driver.name} has been assigned to future booking ${jobId}.`);
+  res.json({ ok: true, status: 'ASSIGNED', driverId });
+});
+
 app.post('/api/admin/drivers', requireAdmin, (req, res) => {
   const { id, name, phone, pin, vehicle_type, license_type, vehicle_make_model_colour, reg_last_3, expiry_date, badge_number, commission_rate } = req.body;
   if (!id || !name || !phone || !pin || !vehicle_type) {
@@ -552,6 +631,17 @@ app.post('/api/admin/assign', requireAdmin, (req, res) => {
 function driverName(id) {
   const d = db.prepare('SELECT name FROM drivers WHERE id = ?').get(id);
   return d ? d.name : 'Your driver';
+}
+
+function buildBidResponse(row) {
+  return {
+    bidId: row.id,
+    jobId: row.job_id,
+    driverId: row.driver_id,
+    amount: row.amount,
+    status: row.status,
+    createdAt: row.created_at
+  };
 }
 
 function jobResponse(row) {

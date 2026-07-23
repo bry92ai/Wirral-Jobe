@@ -122,6 +122,11 @@ export default function DriverPage() {
   const [loading, setLoading] = useState(false);
   const [currentZoneId, setCurrentZoneId] = useState(null);
   const [heading, setHeading] = useState(null);
+  const [openPanel, setOpenPanel] = useState(null);
+  const [bidBoard, setBidBoard] = useState([]);
+  const [myBids, setMyBids] = useState([]);
+  const [futureBookings, setFutureBookings] = useState([]);
+  const [bidAmounts, setBidAmounts] = useState({});
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -187,6 +192,42 @@ export default function DriverPage() {
   async function loadOtherDrivers() {
     try { const data = await apiGet('/drivers'); setOtherDrivers(data.drivers || []); }
     catch {}
+  }
+
+  async function loadBidBoard(id = driverId) {
+    try { const data = await apiGet('/driver/bid-board', { 'x-driver-id': id }); setBidBoard(data.jobs || []); }
+    catch {}
+  }
+
+  async function loadMyBids(id = driverId) {
+    try { const data = await apiGet('/driver/my-bids', { 'x-driver-id': id }); setMyBids(data.bids || []); }
+    catch {}
+  }
+
+  async function loadFutureBookings(id = driverId) {
+    try { const data = await apiGet('/driver/future-bookings', { 'x-driver-id': id }); setFutureBookings(data.jobs || []); }
+    catch {}
+  }
+
+  async function placeBid(jobId) {
+    const amount = bidAmounts[jobId];
+    if (!amount || Number(amount) <= 0) return setError('Enter a bid amount');
+    setLoading(true); setError('');
+    try {
+      await api(`driver/bid-board/${jobId}/bid`, { amount: Number(amount) }, { 'x-driver-id': driverId });
+      await Promise.all([loadBidBoard(), loadMyBids()]);
+      setBidAmounts(prev => { const next = { ...prev }; delete next[jobId]; return next; });
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  async function acceptFutureBooking(jobId) {
+    setLoading(true); setError('');
+    try {
+      await api(`driver/future-bookings/${jobId}/accept`, {}, { 'x-driver-id': driverId });
+      await Promise.all([loadFutureBookings(), loadJobs()]);
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
   }
 
   async function acceptOffer(jobId) {
@@ -337,7 +378,7 @@ export default function DriverPage() {
   useEffect(() => {
     if (!loggedIn) return;
     loadJobs(); loadOffers(); loadProfile(); loadOtherDrivers();
-    const id = setInterval(() => { loadJobs(); loadOffers(); loadOtherDrivers(); }, 5000);
+    const id = setInterval(() => { loadJobs(); loadOffers(); loadOtherDrivers(); loadBidBoard(); loadMyBids(); loadFutureBookings(); }, 5000);
     return () => clearInterval(id);
   }, [loggedIn, driverId]);
 
@@ -449,6 +490,8 @@ export default function DriverPage() {
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: locationOk ? '#22c55e' : '#ef4444' }} />
             {locationOk ? 'Online' : 'Loc off'}
           </span>
+          <button className="secondary" onClick={() => setOpenPanel('bids')} style={{ margin: 0, padding: '0.4rem 0.75rem', fontSize: '0.8rem', width: 'auto' }}>Bids</button>
+          <button className="secondary" onClick={() => setOpenPanel('future')} style={{ margin: 0, padding: '0.4rem 0.75rem', fontSize: '0.8rem', width: 'auto' }}>Future</button>
           <button className="secondary" onClick={logout} style={{ margin: 0, padding: '0.4rem 0.75rem', fontSize: '0.8rem', width: 'auto' }}>Log out</button>
         </div>
       </div>
@@ -548,6 +591,90 @@ export default function DriverPage() {
                 {loading ? 'Updating…' : STATUS_ACTIONS[activeJob.status].label}
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {openPanel && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 2000,
+          background: 'rgba(0,0,0,0.35)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end'
+        }} onClick={() => setOpenPanel(null)}>
+          <div style={{
+            background: 'white', borderRadius: '18px 18px 0 0',
+            maxHeight: '75%', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 -8px 30px rgba(0,0,0,0.2)'
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1rem 0.5rem', borderBottom: '1px solid #e5e7eb' }}>
+              <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{openPanel === 'bids' ? 'Bids' : 'Future bookings'}</h2>
+              <button className="secondary" onClick={() => setOpenPanel(null)} style={{ width: 'auto', margin: 0, padding: '0.35rem 0.7rem', fontSize: '0.8rem' }}>Close</button>
+            </div>
+            <div style={{ overflowY: 'auto', padding: '0.75rem 1rem 1.5rem' }}>
+              {openPanel === 'bids' && (
+                <>
+                  <h3 style={{ fontSize: '0.85rem', color: '#6b7280', margin: '1rem 0 0.5rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>Open jobs</h3>
+                  {bidBoard.length === 0 && <p style={{ color: '#6b7280', fontSize: '0.9rem' }}>No open jobs to bid on right now.</p>}
+                  {bidBoard.map(job => (
+                    <div key={job.jobId} className="card" style={{ padding: '0.85rem', marginBottom: '0.75rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                        <span style={{ fontWeight: 700 }}>{formatCurrency(job.fare)}</span>
+                        <span className="badge" style={{ background: '#e0f2fe', color: '#0369a1' }}>{job.vehicleType?.toUpperCase()}</span>
+                      </div>
+                      <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>{job.pickupAddress} → {job.dropoffAddress}</div>
+                      {job.myBid ? (
+                        <div style={{ fontSize: '0.85rem', color: '#15803d', fontWeight: 600 }}>Your bid: {formatCurrency(job.myBid.amount)}</div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="Bid amount"
+                            value={bidAmounts[job.jobId] || ''}
+                            onChange={e => setBidAmounts(prev => ({ ...prev, [job.jobId]: e.target.value }))}
+                            style={{ flex: 1, margin: 0 }}
+                          />
+                          <button onClick={() => placeBid(job.jobId)} disabled={loading} style={{ width: 'auto', margin: 0, padding: '0.65rem 1rem', whiteSpace: 'nowrap' }}>Bid</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  <h3 style={{ fontSize: '0.85rem', color: '#6b7280', margin: '1.5rem 0 0.5rem', textTransform: 'uppercase', letterSpacing: 0.5 }}>My bids</h3>
+                  {myBids.length === 0 && <p style={{ color: '#6b7280', fontSize: '0.9rem' }}>You haven't placed any bids yet.</p>}
+                  {myBids.map(bid => (
+                    <div key={bid.bidId} className="card" style={{ padding: '0.75rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{bid.jobId}</div>
+                        <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>{formatCurrency(bid.amount)} · {bid.status}</div>
+                      </div>
+                      <span className="badge" style={{ background: bid.status === 'ACCEPTED' ? '#dcfce7' : '#fef3c7', color: bid.status === 'ACCEPTED' ? '#166534' : '#92400e' }}>{bid.status}</span>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {openPanel === 'future' && (
+                <>
+                  {futureBookings.length === 0 && <p style={{ color: '#6b7280', fontSize: '0.9rem' }}>No future bookings available.</p>}
+                  {futureBookings.map(job => (
+                    <div key={job.jobId} className="card" style={{ padding: '0.85rem', marginBottom: '0.75rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                        <span style={{ fontWeight: 700 }}>{formatCurrency(job.fare)}</span>
+                        <span className="badge" style={{ background: '#f3e8ff', color: '#7e22ce' }}>{job.vehicleType?.toUpperCase()}</span>
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: '#6b7280', marginBottom: '0.25rem' }}>{new Date(job.pickupTime).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+                      <div style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>{job.pickupAddress} → {job.dropoffAddress}</div>
+                      {job.driverId ? (
+                        <div style={{ fontSize: '0.85rem', color: '#15803d', fontWeight: 600 }}>{job.driverId === driverId ? 'Assigned to you' : `Assigned to ${job.driverId}`}</div>
+                      ) : (
+                        <button onClick={() => acceptFutureBooking(job.jobId)} disabled={loading} style={{ margin: 0 }}>Accept booking</button>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
