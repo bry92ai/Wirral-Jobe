@@ -434,9 +434,9 @@ export default function DriverPage() {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.1rem' }}>WF</div>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.1rem' }}>WJ</div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Wirral Flightpath</div>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>The Wirral Jobe</div>
             <div style={{ fontSize: '0.75rem', opacity: 0.85 }}>{driverName || driverId} · {profile ? `${getZoneName(profile.zone)} · ${formatCurrency(profile.settleBalance)}` : driverId}</div>
           </div>
         </div>

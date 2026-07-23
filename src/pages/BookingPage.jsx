@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
-import { loadGoogleMapsScript } from '../lib/maps.js';
 import { calculateFare, calculateAirportFare, getTimeOfDay } from '../lib/fare.js';
 import { distanceMiles } from '../lib/geo.js';
 
-const GOOGLE_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const DEFAULT_CENTER = { lat: 53.393, lng: -3.019 };
 const AIRPORTS = [
   { name: 'Liverpool John Lennon Airport (LPL)', lat: 53.3331, lng: -2.8496 },
@@ -69,15 +67,6 @@ async function osrmRoute(lat1, lng1, lat2, lng2) {
   }
 }
 
-function trafficStatus(durationSec, trafficSec) {
-  const base = Math.max(1, durationSec);
-  const traffic = Math.max(base, trafficSec || base);
-  const ratio = traffic / base;
-  if (ratio <= 1.15) return { status: 'green', text: 'Clear roads' };
-  if (ratio <= 1.4) return { status: 'amber', text: 'Some traffic' };
-  return { status: 'red', text: 'Heavy traffic' };
-}
-
 function addMinutes(date, minutes) {
   const d = new Date(date);
   d.setMinutes(d.getMinutes() + minutes);
@@ -90,8 +79,6 @@ function toIsoLocal(date) {
 }
 
 export default function BookingPage() {
-  const [mapReady, setMapReady] = useState(false);
-  const [mapError, setMapError] = useState('');
   const [screen, setScreen] = useState('home');
   const [isFuture, setIsFuture] = useState(false);
 
@@ -124,17 +111,6 @@ export default function BookingPage() {
   const [returnTrip, setReturnTrip] = useState(null);
   const [returnResult, setReturnResult] = useState(null);
 
-  const mapRef = useRef(null);
-  const mapObjRef = useRef(null);
-  const pickupMarkerRef = useRef(null);
-  const dropoffMarkerRef = useRef(null);
-  const directionsRendererRef = useRef(null);
-  const trafficLayerRef = useRef(null);
-  const autocompleteServiceRef = useRef(null);
-  const placesServiceRef = useRef(null);
-  const geocoderRef = useRef(null);
-  const directionsServiceRef = useRef(null);
-  const sessionTokenRef = useRef(null);
   const predictionDebounceRef = useRef(null);
 
   const oneWayCarFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'car' }) || calculateFare({ miles: route.miles, vehicleType: 'car', timeOfDay: getTimeOfDay(new Date()) })) || 0;
@@ -144,195 +120,32 @@ export default function BookingPage() {
   const mpvFare = oneWayMpvFare * tripCount;
 
   useEffect(() => {
-    let mounted = true;
-    if (!GOOGLE_KEY) {
-      setMapError('Google Maps API key is missing.');
-      return;
-    }
-    loadGoogleMapsScript(GOOGLE_KEY)
-      .then(() => {
-        if (!mounted || !mapRef.current) return;
-        const google = window.google;
-        const map = new google.maps.Map(mapRef.current, {
-          center: DEFAULT_CENTER,
-          zoom: 14,
-          disableDefaultUI: true,
-          zoomControl: false,
-          fullscreenControl: false,
-          streetViewControl: false,
-          mapTypeControl: false,
-          gestureHandling: 'greedy'
-        });
-        mapObjRef.current = map;
-
-        trafficLayerRef.current = new google.maps.TrafficLayer();
-        trafficLayerRef.current.setMap(map);
-
-        directionsServiceRef.current = new google.maps.DirectionsService();
-        directionsRendererRef.current = new google.maps.DirectionsRenderer({
-          map,
-          suppressMarkers: true,
-          polylineOptions: { strokeColor: '#005eb8', strokeWeight: 5, strokeOpacity: 0.9 }
-        });
-
-        pickupMarkerRef.current = new google.maps.Marker({ map, visible: false });
-        dropoffMarkerRef.current = new google.maps.Marker({ map, visible: false });
-
-        autocompleteServiceRef.current = new google.maps.places.AutocompleteService();
-        placesServiceRef.current = new google.maps.places.PlacesService(map);
-        geocoderRef.current = new google.maps.Geocoder();
-        sessionTokenRef.current = new google.maps.places.AutocompleteSessionToken();
-
-        setMapReady(true);
-      })
-      .catch(err => setMapError(err.message || 'Failed to load Google Maps.'));
-
-    return () => { mounted = false; };
-  }, []);
-
-  useEffect(() => {
-    if (!mapReady || !navigator.geolocation) return;
+    if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => setPickupFromLatLng(pos.coords.latitude, pos.coords.longitude),
       () => { if (!pickup.lat) setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng); },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady]);
+  }, []);
 
   useEffect(() => {
-    if (!mapReady) return;
-    const marker = pickupMarkerRef.current;
-    if (!marker) return;
-    if (pickup.lat != null && pickup.lng != null) {
-      marker.setPosition({ lat: pickup.lat, lng: pickup.lng });
-      marker.setVisible(true);
-      marker.setIcon({
-        url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
-          `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 24 24"><path fill="#005eb8" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="#fff"/></svg>`
-        ),
-        scaledSize: new window.google.maps.Size(36, 44),
-        anchor: new window.google.maps.Point(18, 44)
-      });
-      if (screen === 'home') mapObjRef.current?.panTo({ lat: pickup.lat, lng: pickup.lng });
-    } else {
-      marker.setVisible(false);
-    }
-  }, [mapReady, pickup, screen]);
-
-  useEffect(() => {
-    if (!mapReady) return;
-    const marker = dropoffMarkerRef.current;
-    if (!marker) return;
-    if (dropoff.lat != null && dropoff.lng != null) {
-      marker.setPosition({ lat: dropoff.lat, lng: dropoff.lng });
-      marker.setVisible(true);
-      marker.setIcon({
-        url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
-          `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 24 24"><path fill="#ef4444" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="#fff"/></svg>`
-        ),
-        scaledSize: new window.google.maps.Size(36, 44),
-        anchor: new window.google.maps.Point(18, 44)
-      });
-    } else {
-      marker.setVisible(false);
-    }
-  }, [mapReady, dropoff]);
-
-  useEffect(() => {
-    if (!mapReady) return;
     if (pickup.lat != null && dropoff.lat != null) {
       computeRoute();
-    } else {
-      directionsRendererRef.current?.setDirections({ routes: [] });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
+  }, [pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
 
   function setPickupFromLatLng(lat, lng) {
     setPickup({ address: '', lat, lng });
-    let settled = false;
-    const fallbackTimeout = setTimeout(async () => {
-      if (settled) return;
-      settled = true;
-      const address = await nominatimReverse(lat, lng);
-      setPickup({ address, lat, lng });
-    }, 2000);
-    if (geocoderRef.current) {
-      try {
-        geocoderRef.current.geocode({ location: { lat, lng } }, async (results, status) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(fallbackTimeout);
-          if (status === 'OK' && results?.[0]) {
-            setPickup({ address: results[0].formatted_address, lat, lng });
-          } else {
-            const address = await nominatimReverse(lat, lng);
-            setPickup({ address, lat, lng });
-          }
-        });
-      } catch {
-        clearTimeout(fallbackTimeout);
-        if (!settled) {
-          settled = true;
-          nominatimReverse(lat, lng).then(address => setPickup({ address, lat, lng }));
-        }
-      }
-    } else {
-      clearTimeout(fallbackTimeout);
-      nominatimReverse(lat, lng).then(address => setPickup({ address, lat, lng }));
-    }
+    nominatimReverse(lat, lng).then(address => setPickup({ address, lat, lng }));
   }
 
   async function computeRoute() {
-    if (!directionsServiceRef.current || !directionsRendererRef.current) {
-      const fallback = await osrmRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
-      setRoute(fallback);
-      setRouteLoading(false);
-      return;
-    }
     setRouteLoading(true);
-    let settled = false;
-    const fallbackTimeout = setTimeout(async () => {
-      if (settled) return;
-      settled = true;
-      directionsRendererRef.current.setDirections({ routes: [] });
-      const fallback = await osrmRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
-      setRoute(fallback);
-      setRouteLoading(false);
-    }, 2500);
-    directionsServiceRef.current.route({
-      origin: { lat: pickup.lat, lng: pickup.lng },
-      destination: { lat: dropoff.lat, lng: dropoff.lng },
-      travelMode: 'DRIVING',
-      provideRouteAlternatives: false
-    }, async (res, status) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(fallbackTimeout);
-      setRouteLoading(false);
-      if (status === 'OK' && res?.routes?.[0]) {
-        directionsRendererRef.current.setDirections(res);
-        const leg = res.routes[0].legs[0];
-        const miles = Number((leg.distance.value / 1609.344).toFixed(2));
-        const durationSec = leg.duration.value;
-        const trafficSec = leg.duration_in_traffic ? leg.duration_in_traffic.value : durationSec;
-        const traffic = trafficStatus(durationSec, trafficSec);
-        setRoute({
-          miles,
-          durationSec,
-          durationText: leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text,
-          trafficText: traffic.text,
-          trafficStatus: traffic.status
-        });
-        const bounds = res.routes[0].bounds;
-        if (bounds) mapObjRef.current?.fitBounds(bounds, { top: 80, right: 40, bottom: 220, left: 40 });
-      } else {
-        directionsRendererRef.current.setDirections({ routes: [] });
-        const fallback = await osrmRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
-        setRoute(fallback);
-      }
-    });
+    const routeData = await osrmRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
+    setRoute(routeData);
+    setRouteLoading(false);
   }
 
   async function fetchPredictions(input) {
@@ -342,46 +155,9 @@ export default function BookingPage() {
     }
     setFetchingPredictions(true);
     const center = pickup.lat != null ? { lat: pickup.lat, lng: pickup.lng } : DEFAULT_CENTER;
-    let settled = false;
-    const fallbackTimeout = setTimeout(() => loadNominatim(), 1500);
-    function finish(list) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(fallbackTimeout);
-      setPredictions(list);
-      setFetchingPredictions(false);
-    }
-    async function loadNominatim() {
-      if (settled) return;
-      const list = await nominatimSearch(input, center);
-      finish(list);
-    }
-    if (autocompleteServiceRef.current) {
-      try {
-        autocompleteServiceRef.current.getPlacePredictions({
-          input,
-          componentRestrictions: { country: 'gb' },
-          locationBias: new window.google.maps.LatLng(center.lat, center.lng),
-          sessionToken: sessionTokenRef.current
-        }, (preds, status) => {
-          const ok = status === window.google.maps.places.PlacesServiceStatus.OK && preds?.length;
-          if (ok) {
-            finish(preds.map(p => ({
-              id: p.place_id,
-              source: 'google',
-              main: p.structured_formatting?.main_text || p.description,
-              secondary: p.structured_formatting?.secondary_text || ''
-            })));
-          } else {
-            loadNominatim();
-          }
-        });
-      } catch {
-        loadNominatim();
-      }
-    } else {
-      loadNominatim();
-    }
+    const list = await nominatimSearch(input, center);
+    setPredictions(list);
+    setFetchingPredictions(false);
   }
 
   function onSearchChange(e) {
@@ -392,23 +168,7 @@ export default function BookingPage() {
   }
 
   function selectPlace(pred) {
-    if (pred.source === 'google') {
-      if (!placesServiceRef.current) return;
-      placesServiceRef.current.getDetails({
-        placeId: pred.id,
-        fields: ['geometry', 'formatted_address', 'name'],
-        sessionToken: sessionTokenRef.current
-      }, (place, status) => {
-        if (status !== window.google.maps.places.PlacesServiceStatus.OK || !place?.geometry?.location) return;
-        const lat = place.geometry.location.lat();
-        const lng = place.geometry.location.lng();
-        const address = place.formatted_address || place.name || '';
-        sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
-        applySelection(address, lat, lng);
-      });
-    } else {
-      applySelection(pred.address, pred.lat, pred.lng);
-    }
+    applySelection(pred.address, pred.lat, pred.lng);
   }
 
   function applySelection(address, lat, lng) {
@@ -424,7 +184,6 @@ export default function BookingPage() {
       setPredictions([]);
       setScreen('route');
     }
-    mapObjRef.current?.panTo({ lat, lng });
   }
 
   function startAsap() {
@@ -465,27 +224,9 @@ export default function BookingPage() {
   }
 
   function selectAirportPlace(pred) {
-    if (pred.source === 'google') {
-      if (!placesServiceRef.current) return;
-      placesServiceRef.current.getDetails({
-        placeId: pred.id,
-        fields: ['geometry', 'formatted_address', 'name'],
-        sessionToken: sessionTokenRef.current
-      }, (place, status) => {
-        if (status !== window.google.maps.places.PlacesServiceStatus.OK || !place?.geometry?.location) return;
-        const lat = place.geometry.location.lat();
-        const lng = place.geometry.location.lng();
-        const address = place.formatted_address || place.name || '';
-        sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
-        setOtherLocation({ address, lat, lng });
-        setQuery(address);
-        setPredictions([]);
-      });
-    } else {
-      setOtherLocation({ address: pred.address, lat: pred.lat, lng: pred.lng });
-      setQuery(pred.address);
-      setPredictions([]);
-    }
+    setOtherLocation({ address: pred.address, lat: pred.lat, lng: pred.lng });
+    setQuery(pred.address);
+    setPredictions([]);
   }
 
   function continueAirport() {
@@ -620,18 +361,16 @@ export default function BookingPage() {
         return (
           <div style={{ textAlign: 'center', padding: '1rem 0.5rem' }}>
             <div style={{ marginBottom: '1.5rem' }}>
-              <div style={{
-                width: 84, height: 84, borderRadius: '50%', background: 'linear-gradient(135deg, #0f172a 0%, #005eb8 100%)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem', color: 'white'
-              }}>
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.5-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.6A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/>
-                  <circle cx="7" cy="17" r="2"/>
-                  <circle cx="17" cy="17" r="2"/>
-                </svg>
+              <img
+                src="/logo.png"
+                alt="The Wirral Jobe"
+                onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                style={{ maxWidth: 260, maxHeight: 180, margin: '0 auto 1rem', display: 'block' }}
+              />
+              <div style={{ display: 'none', justifyContent: 'center', alignItems: 'center', margin: '0 auto 1rem', width: 260, minHeight: 140, background: '#facc15', color: '#000000', borderRadius: 16, padding: '1rem', fontWeight: 800, fontSize: '1.75rem', textAlign: 'center', boxSizing: 'border-box' }}>
+                THE WIRRAL<br />JOBE
               </div>
-              <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 800, color: '#0f172a' }}>Wirral Flightpath</h1>
-              <p style={{ margin: '0.5rem 0 0', color: '#6b7280', fontSize: '0.95rem' }}>Local taxis, airport runs, any time.</p>
+              <p style={{ margin: '0.5rem 0 0', color: '#6b7280', fontSize: '0.95rem' }}>Local knowledge. Always on call.</p>
             </div>
             <button onClick={startAsap} style={{
               width: '100%', padding: '1.1rem 1rem', borderRadius: 14, border: 'none', background: '#005eb8', color: 'white',
@@ -940,35 +679,12 @@ export default function BookingPage() {
   }
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden', background: '#f8fafc', fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
-      <style>{`
-        .gm-err-container, .gm-err-content, .gm-err-title, .gm-err-message, .gm-err-icon, .gm-err-close, .gm-err-map {
-          display: none !important;
-        }
-      `}</style>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, padding: '1rem 1.25rem', background: 'linear-gradient(135deg, #0f172a 0%, #005eb8 100%)', color: 'white', boxShadow: '0 2px 10px rgba(0,0,0,0.15)' }}>
-        <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800 }}>Wirral Flightpath</h1>
-      </div>
-
-      <div ref={mapRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} />
-
-      {!mapReady && !mapError && (
-        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 15, background: 'rgba(255,255,255,0.9)', padding: '1rem 1.5rem', borderRadius: 12, fontWeight: 600 }}>Loading map…</div>
-      )}
-
-      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 20, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-        <div style={{
-          width: '100%', maxWidth: 540, background: 'white', borderRadius: '20px 20px 0 0', boxShadow: '0 -8px 30px rgba(0,0,0,0.15)',
-          padding: '1.25rem', pointerEvents: 'auto', maxHeight: '70vh', overflowY: 'auto', transition: 'transform 0.3s ease, opacity 0.3s ease'
-        }}>
-          {mapError && (
-            <div style={{ background: '#fee2e2', color: '#991b1b', borderRadius: 10, padding: '0.75rem 1rem', marginBottom: '1rem', fontSize: '0.85rem', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
-              <span>{mapError}</span>
-              <button onClick={() => window.location.reload()} style={{ border: 'none', background: '#991b1b', color: 'white', borderRadius: 6, padding: '0.35rem 0.75rem', fontWeight: 600, cursor: 'pointer', fontSize: '0.8rem' }}>Retry</button>
-            </div>
-          )}
-          {renderScreen()}
-        </div>
+    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#ffffff', fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+      <div style={{
+        width: '100%', maxWidth: 540, background: '#ffffff', color: '#111827', borderRadius: 20, boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+        padding: '1.25rem', maxHeight: '90vh', overflowY: 'auto', transition: 'transform 0.3s ease, opacity 0.3s ease'
+      }}>
+        {renderScreen()}
       </div>
     </div>
   );
