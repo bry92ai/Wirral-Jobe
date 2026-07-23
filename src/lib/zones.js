@@ -1,6 +1,17 @@
-import zonesRaw from '../data/flightpathZones.geojson?raw';
+import FLIGHTPATH_ZONES_DATA from '../data/flightpathZones.js';
 
-export const FLIGHTPATH_ZONES = JSON.parse(zonesRaw);
+export const FLIGHTPATH_ZONES = FLIGHTPATH_ZONES_DATA;
+
+export const ZONES = FLIGHTPATH_ZONES.features.map(f => ({
+  id: f.properties.zoneId,
+  lat: f.properties.labelLat,
+  lng: f.properties.labelLng
+}));
+
+export function getZone(lat, lng) {
+  const feature = findZone(lat, lng);
+  return feature ? feature.properties.zoneId : null;
+}
 
 export function getZoneById(zoneId) {
   return FLIGHTPATH_ZONES.features.find(f => f.properties.zoneId === zoneId) || null;

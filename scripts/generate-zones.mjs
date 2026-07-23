@@ -111,6 +111,9 @@ const combined = {
 
 fs.writeFileSync(OUTPUT, JSON.stringify(combined));
 
+const JS_OUTPUT = 'src/data/flightpathZones.js';
+fs.writeFileSync(JS_OUTPUT, `export default ${JSON.stringify(combined)};\n`);
+
 const geoJsonString = JSON.stringify(combined);
 
 const backendCode = `// Auto-generated Flightpath operational zones
@@ -205,6 +208,7 @@ function getZoneName(zoneId) {
 fs.writeFileSync(BACKEND, backendCode);
 
 console.log(`Wrote ${OUTPUT} with ${combined.features.length} features`);
+console.log(`Wrote ${JS_OUTPUT}`);
 console.log(`Wrote ${BACKEND}`);
 
 function _containsPoint(lat, lng, geometry) {

@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 
 const server = spawn('node', ['server.js'], { stdio: 'pipe' });
-await new Promise(r => setTimeout(r, 1500));
+await new Promise(r => setTimeout(r, 12000));
 
 try {
   const ping = await fetch('http://localhost:3001/api/ping');
