@@ -202,11 +202,11 @@ function offerNextDriver(jobId, pickupLat, pickupLng) {
   }
   state.current = driver.id;
   state.offered.add(driver.id);
-  state.expiresAt = Date.now() + 60000;
+  state.expiresAt = Date.now() + 15000;
   if (state.timeout) clearTimeout(state.timeout);
   state.timeout = setTimeout(() => {
     offerNextDriver(jobId, pickupLat, pickupLng);
-  }, 60000);
+  }, 15000);
   console.log(`Offered job ${jobId} to ${driver.id} in zone ${driver.zone}`);
 }
 
@@ -302,17 +302,8 @@ app.post('/api/booking', async (req, res) => {
   sendSmsStub(p.customerPhone, `Wirral Flightpath booking ${jobId} confirmed. Fare £${fare.toFixed(2)}. Track at /track/${token}`);
   appendBookingRow(buildBookingSheetRow(jobId)).catch(err => console.error('Sheets append failed:', err.message));
 
-  const queuedDriver = findNextQueuedDriver(p.pickupLat || 0, p.pickupLng || 0);
-  let assignedDriver = null;
-  if (queuedDriver) {
-    assignedDriver = queuedDriver;
-    db.prepare('UPDATE jobs SET status = ?, driver_id = ?, commission_rate = ? WHERE id = ?')
-      .run('ASSIGNED', assignedDriver.id, assignedDriver.commission_rate || 0, jobId);
-    db.prepare('UPDATE drivers SET status = ? WHERE id = ?').run('BUSY', assignedDriver.id);
-    syncJobToSheet(jobId);
-    syncDriverToSheet(assignedDriver.id);
-    sendSmsStub(p.customerPhone, `Driver ${assignedDriver.name} has been assigned to booking ${jobId}.`);
-  } else {
+  const isFutureBooking = new Date(p.pickupTime || new Date().toISOString()) > new Date(Date.now() + 60 * 60 * 1000);
+  if (!isFutureBooking) {
     startOfferProcess(jobId, p.pickupLat || 0, p.pickupLng || 0);
   }
 

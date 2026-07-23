@@ -1,15 +1,49 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { calculateFare, calculateAirportFare, getTimeOfDay } from '../lib/fare.js';
 import { distanceMiles } from '../lib/geo.js';
 
 const DEFAULT_CENTER = { lat: 53.393, lng: -3.019 };
+const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+const stripePromise = STRIPE_PUBLISHABLE_KEY ? loadStripe(STRIPE_PUBLISHABLE_KEY) : null;
 const AIRPORTS = [
   { name: 'Liverpool John Lennon Airport (LPL)', lat: 53.3331, lng: -2.8496 },
   { name: 'Manchester Airport (MAN)', lat: 53.3537, lng: -2.2740 }
 ];
 
 function formatCurrency(n) { return `£${Number(n).toFixed(2)}`; }
+function PaymentForm({ fare, bookingFee, clientSecret, onConfirm, loading, error }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  return (
+    <>
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+        <div style={{ flex: 1, background: '#f8fafc', borderRadius: 12, padding: '0.75rem', textAlign: 'center' }}>
+          <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 600 }}>BOOKING FEE</div>
+          <div style={{ fontSize: '1.2rem', fontWeight: 800 }}>{formatCurrency(bookingFee)}</div>
+        </div>
+        <div style={{ flex: 1, background: '#f8fafc', borderRadius: 12, padding: '0.75rem', textAlign: 'center' }}>
+          <div style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 600 }}>FULL FARE</div>
+          <div style={{ fontSize: '1.2rem', fontWeight: 800 }}>{formatCurrency(fare)}</div>
+        </div>
+      </div>
+      {clientSecret ? (
+        <div style={{ border: '1.5px solid #e5e7eb', padding: '0.75rem', borderRadius: 12, marginBottom: '1rem', background: 'white' }}>
+          <CardElement options={{ style: { base: { fontSize: '16px', color: '#111827', '::placeholder': { color: '#9ca3af' } } } }} />
+        </div>
+      ) : (
+        <p style={{ color: '#6b7280', fontSize: '0.9rem', marginBottom: '1rem' }}>Card payments are not configured. Tap confirm to place the booking.</p>
+      )}
+      {error && <p style={{ color: '#dc2626', fontSize: '0.85rem', margin: '0 0 0.75rem' }}>{error}</p>}
+      <button onClick={() => onConfirm(stripe, elements)} disabled={loading || (clientSecret && (!stripe || !elements))} style={{ width: '100%' }}>
+        {loading ? 'Processing…' : (clientSecret ? 'Pay booking fee & confirm' : 'Confirm booking')}
+      </button>
+    </>
+  );
+}
+
 function formatPhone(tel) {
   const cleaned = String(tel || '').replace(/\s/g, '');
   return cleaned.startsWith('0') ? `+44${cleaned.slice(1)}` : cleaned;
@@ -101,6 +135,8 @@ export default function BookingPage() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [clientSecret, setClientSecret] = useState(null);
+  const [paymentTarget, setPaymentTarget] = useState('outbound');
 
   const [isAirport, setIsAirport] = useState(false);
   const [airportTripType, setAirportTripType] = useState('single');
@@ -279,36 +315,68 @@ export default function BookingPage() {
       });
       if (outbound.error) throw new Error(outbound.error);
       setResult(outbound);
-
-      if (returnTrip) {
-        const returnDate = new Date(returnTrip.time);
-        let returnPickup = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
-        let returnDropoff = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
-        if (returnTrip.direction === 'from') {
-          returnPickup = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
-          returnDropoff = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
-        }
-        const returnData = await api('booking', {
-          pickupAddress: returnPickup.address,
-          dropoffAddress: returnDropoff.address,
-          pickupLat: returnPickup.lat,
-          pickupLng: returnPickup.lng,
-          dropoffLat: returnDropoff.lat,
-          dropoffLng: returnDropoff.lng,
-          miles: route.miles,
-          vehicleType,
-          timeOfDay: getTimeOfDay(returnDate),
-          pickupTime: returnDate.toISOString(),
-          customerName: customerName.trim(),
-          customerPhone: formatPhone(customerPhone)
-        });
-        if (returnData.error) throw new Error(returnData.error);
-        setReturnResult(returnData);
-      }
-
-      setScreen('success');
+      setClientSecret(outbound.clientSecret || null);
+      setPaymentTarget('outbound');
+      setScreen('payment');
     } catch (err) {
       setError(err.message || 'Booking failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createReturnBooking() {
+    if (!returnTrip) return;
+    const returnDate = new Date(returnTrip.time);
+    let returnPickup = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
+    let returnDropoff = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
+    if (returnTrip.direction === 'from') {
+      returnPickup = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
+      returnDropoff = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
+    }
+    const returnData = await api('booking', {
+      pickupAddress: returnPickup.address,
+      dropoffAddress: returnDropoff.address,
+      pickupLat: returnPickup.lat,
+      pickupLng: returnPickup.lng,
+      dropoffLat: returnDropoff.lat,
+      dropoffLng: returnDropoff.lng,
+      miles: route.miles,
+      vehicleType,
+      timeOfDay: getTimeOfDay(returnDate),
+      pickupTime: returnDate.toISOString(),
+      customerName: customerName.trim(),
+      customerPhone: formatPhone(customerPhone)
+    });
+    if (returnData.error) throw new Error(returnData.error);
+    setReturnResult(returnData);
+    setResult(returnData);
+    setClientSecret(returnData.clientSecret || null);
+    setPaymentTarget('return');
+  }
+
+  async function confirmPayment(stripe, elements) {
+    if (!result) return;
+    setError(''); setLoading(true);
+    try {
+      if (clientSecret && stripe && elements) {
+        const card = elements.getElement(CardElement);
+        if (!card) throw new Error('Card details not entered');
+        const { error: confirmError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, { payment_method: { card } });
+        if (confirmError) throw new Error(confirmError.message);
+        if (paymentIntent.status !== 'succeeded') throw new Error(`Payment ${paymentIntent.status}`);
+      }
+      const confirm = await api('booking/confirm', { jobId: result.jobId });
+      if (confirm.error) throw new Error(confirm.error);
+
+      if (paymentTarget === 'outbound' && returnTrip) {
+        await createReturnBooking();
+        setLoading(false);
+        return;
+      }
+      setScreen('success');
+    } catch (err) {
+      setError(err.message || 'Payment failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -623,6 +691,40 @@ export default function BookingPage() {
               width: '100%', padding: '1rem', borderRadius: 12, border: 'none', background: '#005eb8', color: 'white',
               fontWeight: 700, fontSize: '1rem', cursor: 'pointer', opacity: loading ? 0.6 : 1
             }}>{loading ? 'Booking…' : 'Book now'}</button>
+          </div>
+        );
+
+      case 'payment':
+        return (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <button onClick={() => setScreen('details')} style={{ border: 'none', background: 'none', color: '#005eb8', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+              {isFuture && <span style={{ fontSize: '0.8rem', color: '#005eb8', fontWeight: 600, background: '#f0f7ff', padding: '0.25rem 0.5rem', borderRadius: 8 }}>Future booking</span>}
+            </div>
+            {panelTitle('Payment')}
+            {result && (
+              stripePromise && clientSecret ? (
+                <Elements stripe={stripePromise} options={{ clientSecret }}>
+                  <PaymentForm
+                    fare={result.fare}
+                    bookingFee={result.bookingFee}
+                    clientSecret={clientSecret}
+                    onConfirm={confirmPayment}
+                    loading={loading}
+                    error={error}
+                  />
+                </Elements>
+              ) : (
+                <PaymentForm
+                  fare={result.fare}
+                  bookingFee={result.bookingFee}
+                  clientSecret={null}
+                  onConfirm={confirmPayment}
+                  loading={loading}
+                  error={error}
+                />
+              )
+            )}
           </div>
         );
 
