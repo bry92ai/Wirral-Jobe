@@ -113,7 +113,7 @@ function toIsoLocal(date) {
 }
 
 export default function BookingPage() {
-  const [screen, setScreen] = useState('home');
+  const [screen, setScreenState] = useState('home');
   const [isFuture, setIsFuture] = useState(false);
 
   const [pickup, setPickup] = useState({ address: '', lat: null, lng: null });
@@ -148,6 +148,43 @@ export default function BookingPage() {
   const [returnResult, setReturnResult] = useState(null);
 
   const predictionDebounceRef = useRef(null);
+
+  function navigateToScreen(nextScreen) {
+    window.history.pushState(
+      { ...window.history.state, wirralBookingScreen: nextScreen },
+      '',
+      window.location.href
+    );
+    setScreenState(nextScreen);
+  }
+
+  function goBack() {
+    window.history.back();
+  }
+
+  useEffect(() => {
+    const currentState = window.history.state;
+    const initialScreen = currentState?.wirralBookingScreen || 'home';
+
+    if (!currentState?.wirralBookingScreen) {
+      window.history.replaceState(
+        { ...currentState, wirralBookingScreen: initialScreen },
+        '',
+        window.location.href
+      );
+    }
+
+    setScreenState(initialScreen);
+
+    function handlePopState(event) {
+      if (event.state?.wirralBookingScreen) {
+        setScreenState(event.state.wirralBookingScreen);
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const oneWayCarFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'car' }) || calculateFare({ miles: route.miles, vehicleType: 'car', timeOfDay: getTimeOfDay(new Date()) })) || 0;
   const oneWayMpvFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'mpv' }) || calculateFare({ miles: route.miles, vehicleType: 'mpv', timeOfDay: getTimeOfDay(new Date()) })) || 0;
@@ -213,12 +250,12 @@ export default function BookingPage() {
       setPredictionsFor('dropoff');
       setQuery('');
       setPredictions([]);
-      setScreen('destination');
+      navigateToScreen('destination');
     } else {
       setDropoff({ address, lat, lng });
       setQuery('');
       setPredictions([]);
-      setScreen('route');
+      navigateToScreen('route');
     }
   }
 
@@ -229,7 +266,7 @@ export default function BookingPage() {
     setReturnTrip(null);
     setReturnResult(null);
     setPredictionsFor('dropoff');
-    setScreen('destination');
+    navigateToScreen('destination');
   }
 
   function startFuture() {
@@ -240,7 +277,7 @@ export default function BookingPage() {
     setReturnResult(null);
     setPickupTime(toIsoLocal(addMinutes(new Date(), 60)));
     setPredictionsFor('dropoff');
-    setScreen('destination');
+    navigateToScreen('destination');
   }
 
   function startAirport() {
@@ -256,7 +293,7 @@ export default function BookingPage() {
     setQuery('');
     setPredictions([]);
     setError('');
-    setScreen('airport');
+    navigateToScreen('airport');
   }
 
   function selectAirportPlace(pred) {
@@ -288,7 +325,7 @@ export default function BookingPage() {
     } else {
       setReturnTrip(null);
     }
-    setScreen('route');
+    navigateToScreen('route');
   }
 
   async function submitBooking() {
@@ -317,7 +354,7 @@ export default function BookingPage() {
       setResult(outbound);
       setClientSecret(outbound.clientSecret || null);
       setPaymentTarget('outbound');
-      setScreen('payment');
+      navigateToScreen('payment');
     } catch (err) {
       setError(err.message || 'Booking failed. Please try again.');
     } finally {
@@ -374,7 +411,7 @@ export default function BookingPage() {
         setLoading(false);
         return;
       }
-      setScreen('success');
+      navigateToScreen('success');
     } catch (err) {
       setError(err.message || 'Payment failed. Please try again.');
     } finally {
@@ -386,14 +423,14 @@ export default function BookingPage() {
     setPredictionsFor('pickup');
     setQuery(pickup.address);
     setPredictions([]);
-    setScreen('pickup-search');
+    navigateToScreen('pickup-search');
   }
 
   function backToDestination() {
     setPredictionsFor('dropoff');
     setQuery('');
     setPredictions([]);
-    setScreen('destination');
+    goBack();
   }
 
   function vehicleCard(type, label, capacity, fare) {
@@ -503,7 +540,7 @@ export default function BookingPage() {
         return (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <button onClick={() => setScreen('home')} style={{ border: 'none', background: 'none', color: '#f4bf1a', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+              <button onClick={goBack} style={{ border: 'none', background: 'none', color: '#f4bf1a', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
               {isFuture && <span style={{ fontSize: '0.8rem', color: '#f4bf1a', fontWeight: 600, background: '#141414', padding: '0.25rem 0.5rem', borderRadius: 8 }}>Future booking</span>}
             </div>
             {panelTitle('Where are you going?')}
@@ -541,7 +578,7 @@ export default function BookingPage() {
         return (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <button onClick={() => setScreen('home')} style={{ border: 'none', background: 'none', color: '#f4bf1a', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+              <button onClick={goBack} style={{ border: 'none', background: 'none', color: '#f4bf1a', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
             </div>
             {panelTitle('Airport transfer')}
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', background: '#111111', borderRadius: 12, padding: '0.35rem' }}>
@@ -610,7 +647,7 @@ export default function BookingPage() {
         return (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <button onClick={() => { isAirport ? setScreen('airport') : setScreen('destination'); }} style={{ border: 'none', background: 'none', color: '#f4bf1a', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+              <button onClick={goBack} style={{ border: 'none', background: 'none', color: '#f4bf1a', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
             </div>
             <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
               <div style={{ flex: 1, background: '#111111', borderRadius: 12, padding: '0.75rem', textAlign: 'center' }}>
@@ -631,7 +668,7 @@ export default function BookingPage() {
               {vehicleCard('car', 'Black estate car', 'Up to 4 passengers', carFare)}
               {vehicleCard('mpv', 'Black MPV', 'Up to 8 passengers', mpvFare)}
             </div>
-            <button onClick={() => setScreen('details')} disabled={!vehicleType || routeLoading} style={{
+            <button onClick={() => navigateToScreen('details')} disabled={!vehicleType || routeLoading} style={{
               width: '100%', padding: '1rem', borderRadius: 12, border: 'none', background: '#f4bf1a', color: '#000000',
               fontWeight: 700, fontSize: '1rem', cursor: 'pointer', opacity: routeLoading ? 0.6 : 1
             }}>{routeLoading ? 'Calculating route…' : 'Continue'}</button>
@@ -642,7 +679,7 @@ export default function BookingPage() {
         return (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <button onClick={() => setScreen('route')} style={{ border: 'none', background: 'none', color: '#f4bf1a', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+              <button onClick={goBack} style={{ border: 'none', background: 'none', color: '#f4bf1a', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
               {isFuture && <span style={{ fontSize: '0.8rem', color: '#f4bf1a', fontWeight: 600, background: '#141414', padding: '0.25rem 0.5rem', borderRadius: 8 }}>Future booking</span>}
             </div>
             {panelTitle('Your details')}
@@ -698,7 +735,7 @@ export default function BookingPage() {
         return (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <button onClick={() => setScreen('details')} style={{ border: 'none', background: 'none', color: '#f4bf1a', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
+              <button onClick={goBack} style={{ border: 'none', background: 'none', color: '#f4bf1a', fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Back</button>
               {isFuture && <span style={{ fontSize: '0.8rem', color: '#f4bf1a', fontWeight: 600, background: '#141414', padding: '0.25rem 0.5rem', borderRadius: 8 }}>Future booking</span>}
             </div>
             {panelTitle('Payment')}
