@@ -332,7 +332,7 @@ function isDriverLocationFresh(driver) {
   return Number.isFinite(timestamp) && timestamp >= Date.now() - DRIVER_LOCATION_FRESHNESS_MINUTES * 60000;
 }
 function getAvailableDrivers() {
-  return getDrivers().filter(d => d.status === 'AVAILABLE' && d.last_lat !== '' && d.last_lng !== '' && isDriverLocationFresh(d)).map(d => ({
+  return getDrivers().filter(d => d.status === 'AVAILABLE').map(d => ({
     id: d.id, name: d.name, vehicle_type: d.vehicle_type, zone: d.zone, available_since: d.available_since || null,
     last_lat: Number(d.last_lat) || null, last_lng: Number(d.last_lng) || null, status: d.status
   }));
@@ -845,20 +845,26 @@ function declineOffer(jobId, driverId) {
 function findNextQueuedDriver(pickupLat, pickupLng, excludeIds) {
   ensureDrivers();
   excludeIds = excludeIds || [];
-  const drivers = getDrivers().filter(d => d.status === 'AVAILABLE' && d.last_lat !== '' && d.last_lng !== '' && isDriverLocationFresh(d) && !excludeIds.includes(d.id));
+  const drivers = getDrivers().filter(d => d.status === 'AVAILABLE' && !excludeIds.includes(d.id));
   if (drivers.length === 0) return null;
   const pickupZone = getZone(pickupLat, pickupLng);
+  const hasCoords = d => d.last_lat !== '' && d.last_lng !== '' && isDriverLocationFresh(d);
   drivers.sort((a, b) => {
+    const aFresh = hasCoords(a) ? 0 : 1;
+    const bFresh = hasCoords(b) ? 0 : 1;
+    if (aFresh !== bFresh) return aFresh - bFresh;
     const aSame = a.zone === pickupZone ? 0 : 1;
     const bSame = b.zone === pickupZone ? 0 : 1;
     if (aSame !== bSame) return aSame - bSame;
-    const da = distanceMiles(pickupLat, pickupLng, Number(a.last_lat), Number(a.last_lng));
-    const db = distanceMiles(pickupLat, pickupLng, Number(b.last_lat), Number(b.last_lng));
+    const da = hasCoords(a) ? distanceMiles(pickupLat, pickupLng, Number(a.last_lat), Number(a.last_lng)) : Infinity;
+    const db = hasCoords(b) ? distanceMiles(pickupLat, pickupLng, Number(b.last_lat), Number(b.last_lng)) : Infinity;
+    if ((da === Infinity) !== (db === Infinity)) return da === Infinity ? 1 : -1;
     if (da !== db) return da - db;
     const ta = a.available_since ? new Date(a.available_since).getTime() : 0;
     const tb = b.available_since ? new Date(b.available_since).getTime() : 0;
     return ta - tb;
   });
+  Logger.log('findNextQueuedDriver: pickupZone=%s candidates=%s selected=%s fresh=%s', pickupZone, drivers.length, drivers[0] ? drivers[0].id : 'none', hasCoords(drivers[0]));
   return drivers[0];
 }
 
