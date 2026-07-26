@@ -632,17 +632,60 @@ function DriverPageContent() {
         <div style={{ position: 'absolute', top: 84, left: 12, right: 12, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'none' }}>
           {offers.map(offer => {
             const secondsLeft = Math.max(0, Math.ceil((offer.expiresAt - now) / 1000));
+            const pickupZone = findZone(offer.pickupLat, offer.pickupLng);
+            const dropoffZone = findZone(offer.dropoffLat, offer.dropoffLng);
+            const runningMiles = myLocation ? distanceMiles(myLocation.lat, myLocation.lng, offer.pickupLat, offer.pickupLng) : null;
+            const fareMiles = distanceMiles(offer.pickupLat, offer.pickupLng, offer.dropoffLat, offer.dropoffLng);
             return (
-              <div key={offer.jobId} className="card" style={{ pointerEvents: 'auto', border: '1.5px solid var(--gold)', padding: '0.9rem', borderRadius: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <span className="badge badge-gold">{offer.vehicleType?.toUpperCase() || 'CAR'}</span>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 800, color: secondsLeft < 15 ? '#ff9d9d' : 'var(--gold)' }}>Expires in {secondsLeft}s</span>
+              <div key={offer.jobId} className="card" style={{ pointerEvents: 'auto', border: '2px solid var(--gold)', borderRadius: 18, padding: 0, overflow: 'hidden', background: 'linear-gradient(135deg, #15130b, #090909)', boxShadow: '0 10px 30px rgba(0,0,0,0.45)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(244,191,27,0.12)', borderBottom: '1.5px solid var(--gold)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="wj-dot wj-dot-green" style={{ animation: 'pulse 1.2s infinite' }} />
+                    <span style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--cream)' }}>New job offer</span>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: secondsLeft < 15 ? '#ff9d9d' : 'var(--gold)' }}>{secondsLeft}s left</span>
                 </div>
-                <div style={{ fontWeight: 800, fontSize: '1.15rem', marginBottom: '0.35rem' }}>{formatCurrency(offer.fare)}</div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--cream-dim)', marginBottom: '0.75rem' }}>{offer.pickupAddress} → {offer.dropoffAddress}</div>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button onClick={() => acceptOffer(offer.jobId)} disabled={loading} className="btn btn-primary" style={{ flex: 1 }}>Accept</button>
-                  <button onClick={() => declineOffer(offer.jobId)} disabled={loading} className="btn btn-outline" style={{ flex: 1 }}>Decline</button>
+                <div style={{ padding: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--cream-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Fare</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', lineHeight: 1, color: 'var(--gold)' }}>{formatCurrency(offer.fare)}</div>
+                    </div>
+                    <span style={{ padding: '0.35rem 0.55rem', borderRadius: 8, border: '1.5px solid var(--border-strong)', background: 'rgba(242,234,217,0.06)', color: 'var(--cream)', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase' }}>{offer.vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: '1rem' }}>
+                    <div style={{ padding: '0.65rem', border: '1.5px solid var(--border-strong)', borderRadius: 12, background: 'rgba(0,0,0,0.25)' }}>
+                      <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Running distance</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.15rem', color: 'var(--cream)', marginTop: 4 }}>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</div>
+                      <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', marginTop: 2 }}>To pickup</div>
+                    </div>
+                    <div style={{ padding: '0.65rem', border: '1.5px solid var(--border-strong)', borderRadius: 12, background: 'rgba(0,0,0,0.25)' }}>
+                      <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Fare distance</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.15rem', color: 'var(--cream)', marginTop: 4 }}>{fareMiles != null ? `${fareMiles.toFixed(1)} mi` : '—'}</div>
+                      <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', marginTop: 2 }}>Pickup to drop-off</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '0.75rem' }}>
+                    <span className="wj-dot wj-dot-green" />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--gold)', fontWeight: 800, textTransform: 'uppercase' }}>Pickup</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--cream)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{offer.pickupAddress}</div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--cream-dim)' }}>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : '—'}</div>
+                    </div>
+                  </div>
+                  <div style={{ width: 2, height: 14, background: 'var(--border)', marginLeft: 3, marginBottom: '0.5rem' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '1rem' }}>
+                    <span className="wj-dot wj-dot-red" />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--gold)', fontWeight: 800, textTransform: 'uppercase' }}>Drop-off</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--cream)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{offer.dropoffAddress}</div>
+                      <div style={{ fontSize: '0.65rem', color: 'var(--cream-dim)' }}>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : '—'}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button onClick={() => acceptOffer(offer.jobId)} disabled={loading} className="btn btn-primary" style={{ flex: 1, padding: '0.9rem', fontSize: '1rem', fontFamily: 'var(--font-display)', textTransform: 'uppercase' }}>Accept</button>
+                    <button onClick={() => declineOffer(offer.jobId)} disabled={loading} className="btn btn-outline" style={{ flex: 1, padding: '0.9rem', fontSize: '0.9rem' }}>Decline</button>
+                  </div>
                 </div>
               </div>
             );
