@@ -73,6 +73,7 @@ function DriverPageContent() {
   const [error, setError] = useState('');
   const [locationError, setLocationError] = useState('');
   const [locationOk, setLocationOk] = useState(false);
+  const [lastLocationSentAt, setLastLocationSentAt] = useState(null);
   const [mapReady, setMapReady] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [loading, setLoading] = useState(false);
@@ -452,7 +453,7 @@ function DriverPageContent() {
 
     function sendLocation(lat, lng, zone, accuracy) {
       api('driver/location', { lat, lng, zone, accuracy }, driverAuth())
-        .then(() => { lastLocationUpdateRef.current = Date.now(); })
+        .then(() => { lastLocationUpdateRef.current = Date.now(); setLastLocationSentAt(Date.now()); })
         .catch(err => {
           if (err && err.message) setLocationError('Location send failed: ' + err.message);
         });
@@ -606,6 +607,9 @@ function DriverPageContent() {
         <div style={{ fontWeight: 800, color: 'var(--gold)', marginBottom: '0.25rem', fontSize: '0.9rem', fontFamily: 'var(--font-display)', textTransform: 'uppercase' }}>{queueInfo.zoneName}</div>
         {queueInfo.position != null && (
           <div style={{ marginBottom: '0.4rem', color: 'var(--cream-dim)' }}>Queue: <strong style={{ color: 'var(--cream)' }}>#{queueInfo.position}</strong> of {queueInfo.queue.length}</div>
+        )}
+        {lastLocationSentAt && (
+          <div style={{ fontSize: '0.75rem', color: 'var(--cream-dim)', marginBottom: '0.4rem' }}>Server update: {Math.round((now - lastLocationSentAt) / 1000)}s ago</div>
         )}
         {queueInfo.queue.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
