@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api, apiGet } from '../lib/api.js';
 import { FLIGHTPATH_ZONES, findZone, getZoneName } from '../lib/zones.js';
@@ -60,7 +60,7 @@ function directionsUrl(address, lat, lng) {
 const offerIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 24"><path fill="#22c55e" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
 
 
-export default function DriverPage() {
+function DriverPageContent() {
   const [driverId, setDriverId] = useState(localStorage.getItem('driverId') || '');
   const [driverName, setDriverName] = useState(localStorage.getItem('driverName') || '');
   const [pin, setPin] = useState('');
@@ -888,5 +888,41 @@ export default function DriverPage() {
         </button>
       )}
     </div>
+  );
+}
+
+class DriverErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, info: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    this.setState({ info });
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ position: 'fixed', inset: 0, background: '#0a0a0a', color: '#ff9d9d', padding: '2rem', overflow: 'auto', fontFamily: 'sans-serif' }}>
+          <h2 style={{ color: '#f4bf1b' }}>Driver app error</h2>
+          <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem' }}>{String(this.state.error && (this.state.error.message || this.state.error))}</pre>
+          {this.state.info && (
+            <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.75rem', color: '#f2ead9', marginTop: '1rem' }}>{this.state.info.componentStack}</pre>
+          )}
+          <button onClick={() => window.location.reload()} style={{ marginTop: '1rem', padding: '0.6rem 1rem', background: '#f4bf1b', color: '#0a0a0a', border: 'none', borderRadius: 8, fontWeight: 700 }}>Reload</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function DriverPage() {
+  return (
+    <DriverErrorBoundary>
+      <DriverPageContent />
+    </DriverErrorBoundary>
   );
 }
