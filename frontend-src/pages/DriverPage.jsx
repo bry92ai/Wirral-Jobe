@@ -85,6 +85,7 @@ export default function DriverPage() {
   const [futureTab, setFutureTab] = useState('upcoming');
   const [followMe, setFollowMe] = useState(true);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
+  const [appError, setAppError] = useState('');
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -102,7 +103,20 @@ export default function DriverPage() {
 
   useEffect(() => { currentZoneIdRef.current = currentZoneId; }, [currentZoneId]);
 
-  const activeJob = useMemo(() => jobs.find(j => !['COMPLETE', 'CANCELLED'].includes(j.status)), [jobs]);
+  useEffect(() => {
+    function onErr(msg, url, line, col, err) {
+      setAppError(String(msg) + (err && err.stack ? '\n' + err.stack : ''));
+      return false;
+    }
+    function onRejection(ev) {
+      setAppError('Unhandled promise: ' + String(ev.reason && (ev.reason.message || ev.reason)));
+    }
+    window.onerror = onErr;
+    window.onunhandledrejection = onRejection;
+    return () => { window.onerror = null; window.onunhandledrejection = null; };
+  }, []);
+
+  const activeJob = useMemo(() => (jobs || []).find(j => !['COMPLETE', 'CANCELLED'].includes(j.status)), [jobs]);
 
   const queueInfo = useMemo(() => {
     const zoneId = currentZoneId || profile?.zone || null;
@@ -574,6 +588,12 @@ export default function DriverPage() {
         </div>
       )}
 
+      {appError && (
+        <div style={{ position: 'absolute', top: locationError ? 140 : 76, left: 12, right: 12, zIndex: 1000 }}>
+          <pre style={{ margin: 0, padding: '0.6rem 0.9rem', borderRadius: 10, background: 'var(--surface)', border: '1.5px solid rgba(239,68,68,0.4)', color: '#ff9d9d', fontSize: '0.75rem', whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto' }}>{appError}</pre>
+        </div>
+      )}
+
       <div ref={mapRef} style={{ flex: 1, minHeight: 0 }} />
 
       <div style={{
@@ -595,7 +615,7 @@ export default function DriverPage() {
                 fontWeight: d.id === driverId ? 700 : 400,
                 fontSize: '0.75rem'
               }}>
-                {i + 1}. {d.id.replace(/^DRV-/, '')}
+                {i + 1}. {String(d.id || '').replace(/^DRV-/, '')}
               </span>
             ))}
           </div>
