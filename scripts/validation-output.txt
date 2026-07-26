@@ -1,0 +1,24 @@
+
+=== Validation ===
+Feature count: 18
+Unique zoneIds: PASS
+All geometries valid: PASS
+Overlapping pairs: 0
+Total overlap area: 0.00 m²
+Gap area vs source wards: 0.00 m²
+Test New Brighton (53.437, -3.045): New Brighton
+Test Wallasey centre (53.424, -3.07): Wallasey
+Test Hoylake (53.39, -3.18): Hoylake & Meols
+Test West Kirby (53.373, -3.184): Hoylake & Meols
+Test Birkenhead centre (53.393, -3.017): Birkenhead & Tranmere
+Test Bromborough (53.33, -2.974): Bromborough & Eastham
+Test Eastham (53.315, -2.95): Bromborough & Eastham
+Test Heswall (53.338, -3.105): Heswall, Pensby & Thingwall
+Test Bidston (53.405, -3.07): Bidston & St James
+Test Upton (53.383, -3.1): Upton & Woodchurch
+Test Wallasey/New Brighton border (53.43, -3.045): New Brighton
+Test Oxton/Prenton border (53.375, -3.05): Oxton & Prenton
+Test Outside Wirral (Liverpool centre) (53.4084, -2.9916): Outside Wirral
+Test Outside Wirral (sea) (53.45, -3.2): Outside Wirral
+
+Zones written to src/data/wirralTaxiZones.geojson

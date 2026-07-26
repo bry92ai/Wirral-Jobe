@@ -1,0 +1,872 @@
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Link } from 'react-router-dom';
+import { api, apiGet } from '../lib/api.js';
+import { FLIGHTPATH_ZONES, findZone, getZoneName } from '../lib/zones.js';
+import { distanceMiles } from '../lib/geo.js';
+import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg } from '../lib/leaflet.js';
+import logo from '../assets/logo.jpg';
+
+const NavIcon = {
+  map: (props) => (<svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 3 3 5v16l6-2 6 2 6-2V3l-6 2-6-2z" /><path d="M9 3v16M15 5v16" /></svg>),
+  bids: (props) => (<svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2h12v6l-6 5-6-5V2z" /><path d="M6 22h12v-6l-6-5-6 5v6z" /></svg>),
+  future: (props) => (<svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>),
+  menu: (props) => (<svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16" /></svg>),
+  close: (props) => (<svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>),
+  locate: (props) => (<svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2" /></svg>)
+};
+
+const STATUS_FLOW = ['ASSIGNED', 'ON_WAY', 'ARRIVED', 'POB', 'COMPLETE'];
+const STATUS_LABELS = {
+  ASSIGNED: 'Assigned',
+  ON_WAY: 'On the way',
+  ARRIVED: 'Arrived',
+  POB: 'Passenger on board',
+  COMPLETE: 'Complete'
+};
+const STATUS_ACTIONS = {
+  ASSIGNED: { next: 'ON_WAY', label: 'On the way to pickup' },
+  ON_WAY: { next: 'ARRIVED', label: 'Arrived at pickup' },
+  ARRIVED: { next: 'POB', label: 'Passenger on board' },
+  POB: { next: 'COMPLETE', label: 'Complete journey' }
+};
+
+const MAP_CENTER_DEFAULT = { lat: 53.393, lng: -3.05 };
+
+function getZoneStyle(feature, currentZoneId, selectedZoneId) {
+  const external = feature.properties.external;
+  const active = currentZoneId === feature.properties.zoneId;
+  const selected = selectedZoneId === feature.properties.zoneId;
+  return {
+    color: external ? '#5b5647' : (selected ? '#fff3c4' : '#f4bf1b'),
+    weight: selected ? 4 : (active ? 3 : 1),
+    opacity: external ? 0.5 : 0.8,
+    fillColor: external ? '#5b5647' : (selected ? '#f4bf1b' : '#f4bf1b'),
+    fillOpacity: external ? 0.04 : (selected ? 0.3 : (active ? 0.22 : 0.06)),
+    dashArray: external ? '4 4' : undefined
+  };
+}
+
+function formatCurrency(n) { return `£${Number(n || 0).toFixed(2)}`; }
+function formatPhone(tel) {
+  if (!tel) return null;
+  const cleaned = tel.replace(/\s/g, '');
+  return cleaned.startsWith('0') ? `+44${cleaned.slice(1)}` : cleaned;
+}
+function directionsUrl(address, lat, lng) {
+  if (lat != null && lng != null) return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
+}
+
+const offerIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 24"><path fill="#22c55e" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
+
+
+export default function DriverPage() {
+  const [driverId, setDriverId] = useState(localStorage.getItem('driverId') || '');
+  const [driverName, setDriverName] = useState(localStorage.getItem('driverName') || '');
+  const [pin, setPin] = useState('');
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [jobs, setJobs] = useState([]);
+  const [offers, setOffers] = useState([]);
+  const [otherDrivers, setOtherDrivers] = useState([]);
+  const [profile, setProfile] = useState(null);
+  const [myLocation, setMyLocation] = useState(null);
+  const [error, setError] = useState('');
+  const [locationError, setLocationError] = useState('');
+  const [locationOk, setLocationOk] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const [loading, setLoading] = useState(false);
+  const [currentZoneId, setCurrentZoneId] = useState(null);
+  const [heading, setHeading] = useState(null);
+  const [openPanel, setOpenPanel] = useState(null);
+  const [bidBoard, setBidBoard] = useState([]);
+  const [myBids, setMyBids] = useState([]);
+  const [futureBookings, setFutureBookings] = useState([]);
+  const [futureTab, setFutureTab] = useState('upcoming');
+  const [followMe, setFollowMe] = useState(true);
+  const [selectedZoneId, setSelectedZoneId] = useState(null);
+
+  const mapRef = useRef(null);
+  const LRef = useRef(null);
+  const mapObjRef = useRef(null);
+  const selfMarkerRef = useRef(null);
+  const offerMarkersRef = useRef([]);
+  const otherDriverMarkersRef = useRef([]);
+  const jobMarkersRef = useRef([]);
+  const geoJsonLayerRef = useRef(null);
+  const zoneLabelsRef = useRef([]);
+  const pendingZoneRef = useRef(null);
+  const lastLocationUpdateRef = useRef(0);
+  const lastGpsReadingRef = useRef(0);
+  const currentZoneIdRef = useRef(currentZoneId);
+
+  useEffect(() => { currentZoneIdRef.current = currentZoneId; }, [currentZoneId]);
+
+  const activeJob = useMemo(() => jobs.find(j => !['COMPLETE', 'CANCELLED'].includes(j.status)), [jobs]);
+
+  const queueInfo = useMemo(() => {
+    const zoneId = currentZoneId || profile?.zone || null;
+    const zoneName = zoneId ? getZoneName(zoneId) : 'Outside Wirral';
+    const queue = [profile, ...otherDrivers]
+      .filter(Boolean)
+      .filter(d => d.status === 'AVAILABLE' && d.zone && d.zone === zoneId)
+      .sort((a, b) => String(a.availableSince || '9999').localeCompare(String(b.availableSince || '9999')));
+    const position = queue.findIndex(d => d.id === driverId);
+    return { zoneId, zoneName, queue, position: position >= 0 ? position + 1 : null };
+  }, [currentZoneId, profile, otherDrivers, driverId]);
+
+  const zonePanelInfo = useMemo(() => {
+    if (!selectedZoneId) return null;
+    const zoneName = getZoneName(selectedZoneId);
+    const queue = [profile, ...otherDrivers]
+      .filter(Boolean)
+      .filter(d => d.status === 'AVAILABLE' && d.zone && d.zone === selectedZoneId)
+      .sort((a, b) => String(a.availableSince || '9999').localeCompare(String(b.availableSince || '9999')));
+    const inZone = (job) => {
+      const z = findZone(job.pickupLat, job.pickupLng);
+      return z && z.properties.zoneId === selectedZoneId;
+    };
+    return {
+      zoneId: selectedZoneId,
+      zoneName,
+      queue,
+      bids: bidBoard.filter(inZone),
+      futures: futureBookings.filter(inZone)
+    };
+  }, [selectedZoneId, profile, otherDrivers, bidBoard, futureBookings]);
+
+  async function login(e) {
+    e.preventDefault();
+    setError(''); setLoading(true);
+    try {
+      const res = await api('driver/login', { driverId: driverId.toUpperCase(), pin });
+      localStorage.setItem('driverId', res.driverId);
+      localStorage.setItem('driverName', res.name);
+      localStorage.setItem('driverToken', res.token);
+      setDriverName(res.name);
+      setLoggedIn(true);
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  async function logout() {
+    try {
+      await api('driver/availability', { status: 'OFFLINE' }, driverAuth());
+    } catch (err) {
+      setError(err.message);
+      return;
+    }
+    localStorage.removeItem('driverId');
+    localStorage.removeItem('driverName');
+    localStorage.removeItem('driverToken');
+    setLoggedIn(false);
+    setDriverId(''); setPin('');
+    setJobs([]); setOffers([]); setOtherDrivers([]); setProfile(null);
+    setMyLocation(null);
+  }
+
+  function driverAuth(id = driverId) { return { 'x-driver-id': id, 'x-driver-token': localStorage.getItem('driverToken') || '' }; }
+
+  async function setAvailability(status) {
+    setLoading(true);
+    setError('');
+    try {
+      await api('driver/availability', { status }, driverAuth());
+      await loadProfile();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadProfile(id = driverId) {
+    try {
+      const data = await apiGet('/driver/me', driverAuth(id));
+      setProfile(data);
+      if (data.lastLocationAt) {
+        const ageMs = Date.now() - new Date(data.lastLocationAt).getTime();
+        if (ageMs >= 0 && ageMs < 120000) setLocationOk(true);
+      }
+    }
+    catch {}
+  }
+
+  async function loadJobs(id = driverId) {
+    try { const data = await apiGet('/driver/jobs', driverAuth(id)); setJobs(data.jobs); }
+    catch (err) { setError(err.message); }
+  }
+
+  async function loadOffers(id = driverId) {
+    try { const data = await apiGet('/driver/offers', driverAuth(id)); setOffers(data.offers); }
+    catch {}
+  }
+
+  async function loadOtherDrivers() {
+    try { const data = await apiGet('/drivers'); setOtherDrivers(data.drivers || []); }
+    catch {}
+  }
+
+  async function loadBidBoard(id = driverId) {
+    try { const data = await apiGet('/driver/bid-board', { 'x-driver-id': id }); setBidBoard(data.jobs || []); }
+    catch {}
+  }
+
+  async function loadMyBids(id = driverId) {
+    try { const data = await apiGet('/driver/my-bids', { 'x-driver-id': id }); setMyBids(data.bids || []); }
+    catch {}
+  }
+
+  async function loadFutureBookings(id = driverId) {
+    try { const data = await apiGet('/driver/future-bookings', { 'x-driver-id': id }); setFutureBookings(data.jobs || []); }
+    catch {}
+  }
+
+  async function placeBid(jobId, amount) {
+    if (!amount || Number(amount) <= 0) return setError('This job does not have a valid fare.');
+    setLoading(true); setError('');
+    try {
+      await api(`driver/bid-board/${jobId}/bid`, { amount: Number(amount) }, { 'x-driver-id': driverId });
+      await Promise.all([loadBidBoard(), loadMyBids()]);
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  async function acceptFutureBooking(jobId) {
+    setLoading(true); setError('');
+    try {
+      await api(`driver/future-bookings/${jobId}/accept`, {}, { 'x-driver-id': driverId });
+      await Promise.all([loadFutureBookings(), loadJobs()]);
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  function recenterMap() {
+    setFollowMe(true);
+    const map = mapObjRef.current;
+    if (map && myLocation) map.panTo([myLocation.lat, myLocation.lng]);
+  }
+
+  function requestLocation() {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by this browser/device.');
+      return;
+    }
+    setLocationError('');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude, accuracy, heading: h } = position.coords;
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+        setMyLocation({ lat: latitude, lng: longitude });
+        setLocationOk(true);
+        setLocationError('');
+        lastGpsReadingRef.current = Date.now();
+        if (h != null && !Number.isNaN(h)) setHeading(h);
+      },
+      (err) => {
+        setLocationOk(false);
+        if (err.code === 1) setLocationError('Location access denied. Enable location services in your device settings and tap Loc off.');
+        else if (err.code === 2) setLocationError('Location unavailable. Check that GPS/location services are turned on.');
+        else if (err.code === 3) setLocationError('Location request timed out. Signal may be weak.');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }
+
+  async function acceptOffer(jobId) {
+    setLoading(true);
+    try {
+      await api(`driver/offers/${jobId}/accept`, {}, driverAuth());
+      await Promise.all([loadOffers(), loadJobs()]);
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  async function declineOffer(jobId) {
+    try { await api(`driver/offers/${jobId}/decline`, {}, driverAuth()); loadOffers(); }
+    catch (err) { setError(err.message); }
+  }
+
+  async function setStatus(jobId, status) {
+    setLoading(true);
+    try { await api(`driver/jobs/${jobId}/status`, { status }, driverAuth()); await loadJobs(); await loadProfile(); }
+    catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    let mounted = true;
+    loadLeaflet().then(L => {
+      if (!mounted) return;
+      LRef.current = L;
+      const start = myLocation || MAP_CENTER_DEFAULT;
+      const map = L.map(mapRef.current, { zoomControl: false }).setView([start.lat, start.lng], 14);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
+        maxZoom: 19
+      }).addTo(map);
+      mapObjRef.current = map;
+
+      geoJsonLayerRef.current = L.geoJSON(FLIGHTPATH_ZONES, {
+        filter: f => f.properties.zoneId !== 'international' && !f.properties.external,
+        style: feature => getZoneStyle(feature, currentZoneId, selectedZoneId),
+        onEachFeature: (feature, layer) => {
+          layer.on('click', () => {
+            setSelectedZoneId(feature.properties.zoneId);
+          });
+        }
+      }).addTo(map);
+
+      const labelIcon = (zoneName) => L.divIcon({
+        className: 'zone-label',
+        html: `<span style="color:#f2ead9;font-size:9px;font-weight:600;letter-spacing:0.2px;white-space:nowrap;background:rgba(10,10,10,0.75);padding:1px 4px;border-radius:4px">${zoneName}</span>`,
+        iconSize: [160, 16],
+        iconAnchor: [80, 8]
+      });
+
+      const showLabels = () => {
+        const zoom = map.getZoom();
+        zoneLabelsRef.current.forEach(({ marker, feature }) => {
+          const external = feature.properties.external;
+          let opacity = 0;
+          if (external) opacity = zoom <= 9 ? 0.9 : 0;
+          else opacity = zoom >= 12 ? 0.9 : 0;
+          marker.setOpacity(opacity);
+        });
+      };
+
+      zoneLabelsRef.current = FLIGHTPATH_ZONES.features
+        .filter(feature => feature.properties.zoneId !== 'international' && !feature.properties.external)
+        .map(feature => {
+          const { labelLat, labelLng, zoneName } = feature.properties;
+          const marker = L.marker([labelLat, labelLng], {
+            icon: labelIcon(zoneName),
+            interactive: false,
+            opacity: 0
+          }).addTo(map);
+          return { marker, feature };
+        });
+
+      map.on('zoomend', showLabels);
+      map.on('dragstart', () => setFollowMe(false));
+      const wirralBoundsLayer = L.geoJSON(FLIGHTPATH_ZONES, { filter: f => !f.properties.external });
+      map.fitBounds(wirralBoundsLayer.getBounds(), { padding: [40, 40] });
+      setTimeout(showLabels, 0);
+      setMapReady(true);
+    }).catch(err => setError('Map failed: ' + err.message));
+    return () => { mounted = false; };
+  }, [loggedIn]);
+
+  useEffect(() => {
+    if (!mapReady || !geoJsonLayerRef.current) return;
+    geoJsonLayerRef.current.setStyle(feature => getZoneStyle(feature, currentZoneId, selectedZoneId));
+  }, [mapReady, currentZoneId, selectedZoneId]);
+
+  useEffect(() => {
+    if (!mapReady || !myLocation || !LRef.current) return;
+    const L = LRef.current;
+    const map = mapObjRef.current;
+    if (!selfMarkerRef.current) {
+      selfMarkerRef.current = L.marker([myLocation.lat, myLocation.lng], {
+        icon: headingIcon(L, '#f4bf1b', heading, 36, 'self-marker'),
+        zIndexOffset: 1000
+      }).addTo(map).bindPopup('You');
+    } else {
+      selfMarkerRef.current.setLatLng([myLocation.lat, myLocation.lng]);
+      selfMarkerRef.current.setIcon(headingIcon(L, '#f4bf1b', heading, 36, 'self-marker'));
+    }
+    if (followMe) map.panTo([myLocation.lat, myLocation.lng]);
+  }, [mapReady, myLocation, heading, followMe]);
+
+  useEffect(() => {
+    if (!mapReady || !LRef.current) return;
+    const L = LRef.current;
+    const map = mapObjRef.current;
+    offerMarkersRef.current.forEach(m => map.removeLayer(m));
+    offerMarkersRef.current = offers.map(offer => {
+      const m = L.marker([offer.pickupLat, offer.pickupLng], { icon: divIcon(L, offerIconSvg, 'offer-marker') }).addTo(map)
+        .bindPopup(`<strong>Offer</strong><br>${formatCurrency(offer.fare)}<br>${offer.pickupAddress}`);
+      m.openPopup();
+      return m;
+    });
+  }, [mapReady, offers]);
+
+  useEffect(() => {
+    if (!mapReady || !LRef.current) return;
+    const L = LRef.current;
+    const map = mapObjRef.current;
+    jobMarkersRef.current.forEach(m => map.removeLayer(m));
+    jobMarkersRef.current = [];
+    if (!activeJob) return;
+    const pickup = L.marker([activeJob.pickupLat, activeJob.pickupLng], { icon: divIcon(L, pickupIconSvg, 'pickup-marker') }).addTo(map).bindPopup(`Pickup: ${activeJob.pickupAddress}`);
+    const drop = L.marker([activeJob.dropoffLat, activeJob.dropoffLng], { icon: divIcon(L, dropoffIconSvg, 'dropoff-marker') }).addTo(map).bindPopup(`Drop-off: ${activeJob.dropoffAddress}`);
+    jobMarkersRef.current = [pickup, drop];
+  }, [mapReady, activeJob]);
+
+  useEffect(() => {
+    if (!mapReady || !LRef.current) return;
+    const L = LRef.current;
+    const map = mapObjRef.current;
+    otherDriverMarkersRef.current.forEach(m => map.removeLayer(m));
+    otherDriverMarkersRef.current = otherDrivers
+      .filter(d => d.id !== driverId && d.lastLat != null && d.lastLng != null)
+      .map(d => {
+        return L.marker([d.lastLat, d.lastLng], {
+          icon: vehicleIcon(L, d.vehicle_type || 'car', '#64748b', null, 28, 'driver-marker')
+        }).addTo(map)
+          .bindPopup(`${d.id} · ${d.vehicle_type || 'car'}`);
+      });
+  }, [mapReady, otherDrivers]);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    loadJobs(); loadOffers(); loadProfile(); loadOtherDrivers();
+    const id = setInterval(() => { loadJobs(); loadOffers(); loadProfile(); loadOtherDrivers(); loadBidBoard(); loadMyBids(); loadFutureBookings(); }, 5000);
+    return () => clearInterval(id);
+  }, [loggedIn, driverId]);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [loggedIn]);
+
+  useEffect(() => {
+    if (!loggedIn || !navigator.geolocation) return;
+    setLocationError('');
+
+    function sendLocation(lat, lng, zone, accuracy) {
+      api('driver/location', { lat, lng, zone, accuracy }, driverAuth())
+        .then(() => { lastLocationUpdateRef.current = Date.now(); })
+        .catch(() => {});
+    }
+
+    function handlePosition(position) {
+      const { latitude, longitude, accuracy, heading: h } = position.coords;
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+      const location = { lat: latitude, lng: longitude };
+      setMyLocation(location);
+      setLocationOk(true);
+      setLocationError('');
+      lastGpsReadingRef.current = Date.now();
+      if (h != null && !Number.isNaN(h)) setHeading(h);
+
+      const zoneFeature = findZone(latitude, longitude);
+      const zoneId = zoneFeature ? zoneFeature.properties.zoneId : null;
+      const previousZoneId = currentZoneIdRef.current;
+
+      const pending = pendingZoneRef.current;
+      if (zoneId !== previousZoneId) {
+        if (!pending || pending.zoneId !== zoneId) {
+          pendingZoneRef.current = { zoneId, since: Date.now(), readings: 1 };
+        } else {
+          pending.readings += 1;
+          const elapsed = Date.now() - pending.since;
+          if (pending.readings >= 2 || elapsed >= 20000) {
+            setCurrentZoneId(zoneId);
+            currentZoneIdRef.current = zoneId;
+            sendLocation(latitude, longitude, zoneId, accuracy);
+            pendingZoneRef.current = null;
+            return;
+          }
+        }
+      } else {
+        pendingZoneRef.current = null;
+      }
+
+      sendLocation(latitude, longitude, previousZoneId || zoneId, accuracy);
+    }
+
+    function onGeoError(err) {
+      setLocationOk(false);
+      if (!err) return;
+      if (err.code === 1) {
+        setLocationError('Location access denied. Enable location services and refresh the page.');
+      } else if (err.code === 2) {
+        setLocationError('Location unavailable. Make sure GPS/location services are turned on.');
+      } else if (err.code === 3) {
+        setLocationError('Location request timed out. Signal may be weak.');
+      }
+    }
+
+    function safeGetCurrentPosition(options) {
+      return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) return reject({ code: 2, message: 'Geolocation not supported' });
+        navigator.geolocation.getCurrentPosition(resolve, reject, options);
+      });
+    }
+
+    async function refreshLocation() {
+      try {
+        await safeGetCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+      } catch (err1) {
+        try {
+          await safeGetCurrentPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+        } catch (err2) {
+          onGeoError(err2);
+        }
+      }
+    }
+
+    refreshLocation();
+    const interval = setInterval(refreshLocation, 10000);
+    return () => clearInterval(interval);
+  }, [loggedIn, driverId]);
+
+  if (!loggedIn) {
+    return (
+      <div className="wj-shell">
+        <div className="wj-frame" style={{ maxWidth: 400 }}>
+          <img src={logo} alt="The Wirral Jobe" className="wj-logo" />
+          <p className="wj-tagline" style={{ marginBottom: '1.25rem' }}>Driver portal — log in to start receiving jobs.</p>
+          <form onSubmit={login}>
+            <div className="form-group">
+              <label>Driver ID</label>
+              <input value={driverId} onChange={e => setDriverId(e.target.value.toUpperCase())} placeholder="DRV-001" autoFocus />
+            </div>
+            <div className="form-group">
+              <label>PIN</label>
+              <input type="password" value={pin} onChange={e => setPin(e.target.value)} placeholder="1234" />
+            </div>
+            <button type="submit" disabled={loading} className="btn btn-primary">{loading ? 'Logging in…' : 'Log in'}</button>
+            {error && <p className="error">{error}</p>}
+            <p style={{ fontSize: '0.78rem', color: 'var(--muted)', textAlign: 'center', marginTop: '1.1rem' }}>
+              Demo: DRV-001 / 1234 or DRV-002 / 5678
+            </p>
+            <Link to="/driver/apply" className="wj-portal-back">New driver? Start your application</Link>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+      <div style={{ position: 'absolute', top: 12, left: 12, right: 12, zIndex: 1000 }} className="wj-driver-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <img src={logo} alt="" className="logo-badge" />
+          <div className="name-block">
+            <div className="name">{driverName || driverId}</div>
+            <div className="sub">{profile ? `${getZoneName(profile.zone)} · ${formatCurrency(profile.settleBalance)}` : driverId}</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className={`wj-pill ${locationOk ? 'wj-pill-green' : 'wj-pill-red'}`}
+            onClick={!locationOk ? requestLocation : undefined}
+            style={{ cursor: locationOk ? 'default' : 'pointer' }}
+            title={locationOk ? 'Location active' : 'Tap to enable location'}
+          >
+            <span className={`wj-dot ${locationOk ? 'wj-dot-green' : 'wj-dot-red'}`} />
+            {locationOk ? 'Loc on' : 'Loc off'}
+          </button>
+          <button className="btn btn-outline btn-sm" onClick={() => setAvailability('AVAILABLE')} disabled={loading || profile?.status === 'AVAILABLE'}>Available</button>
+          <button className="btn btn-outline btn-sm" onClick={() => setAvailability('BREAK')} disabled={loading || profile?.status === 'BREAK'}>Break</button>
+          <button className="btn btn-outline btn-sm" onClick={logout} disabled={loading}>Log out</button>
+        </div>
+      </div>
+
+      {locationError && (
+        <div style={{ position: 'absolute', top: 76, left: 12, right: 12, zIndex: 1000 }}>
+          <p className="error" style={{ margin: 0, padding: '0.6rem 0.9rem', borderRadius: 10, background: 'var(--surface)', border: '1.5px solid rgba(239,68,68,0.4)' }}>{locationError}</p>
+        </div>
+      )}
+
+      <div ref={mapRef} style={{ flex: 1, minHeight: 0 }} />
+
+      <div style={{
+        position: 'absolute', bottom: 74, left: 12, zIndex: 1000,
+        background: 'var(--surface)', border: '1.5px solid var(--border-strong)', borderRadius: 14, padding: '0.7rem 0.9rem',
+        maxWidth: 280, fontSize: '0.85rem'
+      }}>
+        <div style={{ fontWeight: 800, color: 'var(--gold)', marginBottom: '0.25rem', fontSize: '0.9rem', fontFamily: 'var(--font-display)', textTransform: 'uppercase' }}>{queueInfo.zoneName}</div>
+        {queueInfo.position != null && (
+          <div style={{ marginBottom: '0.4rem', color: 'var(--cream-dim)' }}>Queue: <strong style={{ color: 'var(--cream)' }}>#{queueInfo.position}</strong> of {queueInfo.queue.length}</div>
+        )}
+        {queueInfo.queue.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {queueInfo.queue.map((d, i) => (
+              <span key={d.id} style={{
+                padding: '2px 7px', borderRadius: 999,
+                background: d.id === driverId ? 'rgba(244,191,27,0.18)' : 'rgba(242,234,217,0.08)',
+                color: d.id === driverId ? 'var(--gold)' : 'var(--cream-dim)',
+                fontWeight: d.id === driverId ? 700 : 400,
+                fontSize: '0.75rem'
+              }}>
+                {i + 1}. {d.id.replace(/^DRV-/, '')}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {offers.length > 0 && (
+        <div style={{ position: 'absolute', top: 84, left: 12, right: 12, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'none' }}>
+          {offers.map(offer => {
+            const secondsLeft = Math.max(0, Math.ceil((offer.expiresAt - now) / 1000));
+            return (
+              <div key={offer.jobId} className="card" style={{ pointerEvents: 'auto', border: '1.5px solid var(--gold)', padding: '0.9rem', borderRadius: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <span className="badge badge-gold">{offer.vehicleType?.toUpperCase() || 'CAR'}</span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 800, color: secondsLeft < 15 ? '#ff9d9d' : 'var(--gold)' }}>Expires in {secondsLeft}s</span>
+                </div>
+                <div style={{ fontWeight: 800, fontSize: '1.15rem', marginBottom: '0.35rem' }}>{formatCurrency(offer.fare)}</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--cream-dim)', marginBottom: '0.75rem' }}>{offer.pickupAddress} → {offer.dropoffAddress}</div>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button onClick={() => acceptOffer(offer.jobId)} disabled={loading} className="btn btn-primary" style={{ flex: 1 }}>Accept</button>
+                  <button onClick={() => declineOffer(offer.jobId)} disabled={loading} className="btn btn-outline" style={{ flex: 1 }}>Decline</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!activeJob && offers.length === 0 && (
+        <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 1000 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(10,10,10,0.9)', border: '1.5px solid var(--border-strong)', color: 'var(--cream)', padding: '0.5rem 1.1rem', borderRadius: 999, fontSize: '0.85rem', fontWeight: 700 }}>
+            <span className="wj-dot wj-dot-green" style={{ animation: 'pulse 1.5s infinite' }} />
+            Online — waiting for jobs
+          </div>
+        </div>
+      )}
+
+      {activeJob && (
+        <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, zIndex: 1000 }}>
+          <div className="card" style={{ padding: '1rem', borderRadius: 18, border: '2px solid var(--gold)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <span className={`badge status-${activeJob.status}`}>{STATUS_LABELS[activeJob.status] || activeJob.status}</span>
+              <span style={{ fontWeight: 800, fontSize: '1.2rem' }}>{formatCurrency(activeJob.fare)}</span>
+            </div>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: '0.35rem' }}>
+                <span className="wj-dot wj-dot-green" style={{ marginTop: 4 }} />
+                <div style={{ fontSize: '0.85rem' }}><span style={{ color: 'var(--gold)', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>Pickup</span><br />{activeJob.pickupAddress}</div>
+              </div>
+              <div style={{ width: 2, height: 14, background: 'var(--border)', marginLeft: 3 }} />
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: '0.25rem' }}>
+                <span className="wj-dot wj-dot-red" style={{ marginTop: 4 }} />
+                <div style={{ fontSize: '0.85rem' }}><span style={{ color: 'var(--gold)', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>Drop-off</span><br />{activeJob.dropoffAddress}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: '0.75rem' }}>
+              <a href={directionsUrl(activeJob.pickupAddress, activeJob.pickupLat, activeJob.pickupLng)} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>To pickup</a>
+              <a href={directionsUrl(activeJob.dropoffAddress, activeJob.dropoffLat, activeJob.dropoffLng)} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>To drop-off</a>
+            </div>
+            {activeJob.customerPhone && (
+              <a href={`tel:${formatPhone(activeJob.customerPhone)}`} className="btn btn-outline btn-sm" style={{ display: 'block', textAlign: 'center', marginBottom: '0.75rem' }}>Call passenger</a>
+            )}
+            {STATUS_ACTIONS[activeJob.status] && (
+              <button onClick={() => setStatus(activeJob.jobId, STATUS_ACTIONS[activeJob.status].next)} disabled={loading} className="btn btn-primary">
+                {loading ? 'Updating…' : STATUS_ACTIONS[activeJob.status].label}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 1050
+      }} className="wj-bottom-nav">
+        <button className="wj-nav-item active" onClick={recenterMap}>
+          <NavIcon.map /> Map
+        </button>
+        <button className="wj-nav-item" onClick={() => setOpenPanel('bids')}>
+          <NavIcon.bids /> Bids
+        </button>
+        <button className="wj-nav-item" onClick={() => setOpenPanel('future')}>
+          <NavIcon.future /> Future
+        </button>
+        <button className="wj-nav-item" onClick={() => setOpenPanel('menu')}>
+          <NavIcon.menu /> Menu
+        </button>
+      </div>
+
+      {openPanel && openPanel !== 'menu' && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 2000,
+          background: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end'
+        }} onClick={() => setOpenPanel(null)}>
+          <div style={{
+            background: 'var(--surface)', border: '1.5px solid var(--border-strong)', borderBottom: 'none',
+            borderRadius: '20px 20px 0 0',
+            maxHeight: '78%', display: 'flex', flexDirection: 'column'
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.1rem 1.1rem 0.75rem', borderBottom: '1.5px solid var(--border)' }}>
+              <h2 className="wj-panel-title" style={{ margin: 0 }}>{openPanel === 'bids' ? 'Bids' : 'Future bookings'}</h2>
+              <button className="btn btn-outline btn-sm" onClick={() => setOpenPanel(null)}>Close</button>
+            </div>
+            <div style={{ overflowY: 'auto', padding: '0.9rem 1.1rem 1.75rem' }}>
+              {openPanel === 'bids' && (
+                <div className="wj-bids-screen">
+                  {bidBoard.length === 0 && <p className="wj-bids-empty">No open jobs to bid on right now.</p>}
+                  {bidBoard.map(job => {
+                    const pickupZone = findZone(job.pickupLat, job.pickupLng);
+                    const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
+                    const runningMiles = myLocation ? distanceMiles(myLocation.lat, myLocation.lng, job.pickupLat, job.pickupLng) : null;
+                    const fareMiles = distanceMiles(job.pickupLat, job.pickupLng, job.dropoffLat, job.dropoffLng);
+                    return (
+                      <article key={job.jobId} className="wj-bid-job">
+                        <div className="wj-bid-heading"><div><h3>New bid</h3><p>Review the job details below and ask for it if you're available.</p></div><span className="wj-bid-availability"><i />Online<small>{queueInfo.zoneName}</small></span></div>
+                        <div className="wj-bid-details">
+                          <div><span className="wj-bid-icon">●</span><p>Running distance<strong>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</strong><small>Distance from you to pickup</small></p></div>
+                          <div><span className="wj-bid-icon">£</span><p>Maximum fare amount<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
+                          <div><span className="wj-bid-icon">╱</span><p>Fare distance<strong>{fareMiles.toFixed(1)} mi</strong><small>Estimated journey distance</small></p></div>
+                          <div><span className="wj-bid-icon">◷</span><p>Vehicle<strong>{job.vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</strong><small>Requested vehicle</small></p></div>
+                          <div><span className="wj-bid-icon">↑</span><p>Pickup zone<strong>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : job.pickupAddress}</strong><small>{job.pickupAddress}</small></p></div>
+                          <div><span className="wj-bid-icon">↓</span><p>Destination zone<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : job.dropoffAddress}</strong><small>{job.dropoffAddress}</small></p></div>
+                        </div>
+                        {job.myBid ? (
+                          <div className="wj-bid-status">You asked for this job at {formatCurrency(job.myBid.amount)}.</div>
+                        ) : (
+                          <div className="wj-bid-actions">
+                            <button onClick={() => placeBid(job.jobId, job.fare)} disabled={loading} className="wj-bid-ask">✋ <span><strong>Ask for this job</strong><small>Ask to be considered for this job</small></span></button>
+                            <button onClick={() => setBidBoard(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading} className="wj-bid-decline">× <span><strong>Not for me</strong><small>Skip this job</small></span></button>
+                          </div>
+                        )}
+                        <p className="wj-bid-disclaimer">ⓘ Asking for the job does not guarantee assignment. The system selects the most suitable driver based on location, ETA, queue position and availability.</p>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+
+              {openPanel === 'future' && (
+                <div className="wj-future-screen">
+                  <div className="wj-future-hero"><img src={logo} alt="The Wirral Jobe" /><div><h3>Future bookings</h3><p>Jobs booked in advance. Allocation will start closer to the pickup time.</p></div></div>
+                  <div className="wj-future-tabs">
+                    <button className={futureTab === 'upcoming' ? 'active' : ''} onClick={() => setFutureTab('upcoming')}>Upcoming</button>
+                    <button className={futureTab === 'offered' ? 'active' : ''} onClick={() => setFutureTab('offered')}>Offered to me</button>
+                    <button className={futureTab === 'all' ? 'active' : ''} onClick={() => setFutureTab('all')}>All</button>
+                  </div>
+                  {(() => {
+                    const shownBookings = futureBookings.filter(job => {
+                      if (futureTab === 'upcoming') return job.driverId === driverId;
+                      if (futureTab === 'offered') return !job.driverId;
+                      return true;
+                    });
+                    if (shownBookings.length === 0) return <p className="wj-future-empty">{futureTab === 'offered' ? 'No future offers available right now.' : 'No future bookings available right now.'}</p>;
+                    let lastDate = '';
+                    return shownBookings.map(job => {
+                      const pickupZone = findZone(job.pickupLat, job.pickupLng);
+                      const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
+                      const runningMiles = myLocation ? distanceMiles(myLocation.lat, myLocation.lng, job.pickupLat, job.pickupLng) : null;
+                      const fareMiles = distanceMiles(job.pickupLat, job.pickupLng, job.dropoffLat, job.dropoffLng);
+                      const date = new Date(job.pickupTime);
+                      const accepted = job.driverId === driverId;
+                      const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' });
+                      const showDate = dateLabel !== lastDate;
+                      lastDate = dateLabel;
+                      return <div key={job.jobId}>{showDate && <div className="wj-future-date">{dateLabel}</div>}<article className="wj-future-card">
+                        <div className={`wj-future-status ${accepted ? 'accepted' : ''}`}>{accepted ? 'Accepted' : 'Future offer'}</div>
+                        <div className="wj-future-time"><span>{date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span><div><strong>{job.dropoffAddress}</strong><small>from {job.pickupAddress}</small></div></div>
+                        <div className="wj-future-details-grid">
+                          <div><span>●</span><p>Running distance<strong>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</strong><small>Distance from you to pickup</small></p></div>
+                          <div><span>╱</span><p>Fare distance<strong>{fareMiles.toFixed(1)} mi</strong><small>Estimated journey distance</small></p></div>
+                          <div><span>↑</span><p>Pickup zone<strong>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : '—'}</strong><small>{job.pickupAddress}</small></p></div>
+                          <div><span>↓</span><p>Destination zone<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : '—'}</strong><small>{job.dropoffAddress}</small></p></div>
+                          <div><span>£</span><p>Maximum fare amount<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
+                        </div>
+                        {accepted ? <div className="wj-future-accepted">Assigned to you</div> : <div className="wj-future-actions"><button onClick={() => acceptFutureBooking(job.jobId)} disabled={loading}>Accept offer</button><button onClick={() => setFutureBookings(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading}>Pass</button></div>}
+                      </article></div>;
+                    });
+                  })()}
+                  <div className="wj-future-footer"><span>◉<b>Local drivers</b><small>Supporting local communities</small></span><span>£<b>Fair prices</b><small>Transparent fares, no hidden fees</small></span><span>▣<b>Future work</b><small>Plan ahead and keep moving forward</small></span></div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {openPanel === 'menu' && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 2000,
+          background: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end'
+        }} onClick={() => setOpenPanel(null)}>
+          <div style={{
+            background: 'var(--surface)', border: '1.5px solid var(--border-strong)', borderBottom: 'none',
+            borderRadius: '20px 20px 0 0', padding: '1.1rem'
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
+              <h2 className="wj-panel-title" style={{ margin: 0 }}>Menu</h2>
+              <button className="btn btn-outline btn-sm" onClick={() => setOpenPanel(null)}>Close</button>
+            </div>
+            <button className="btn btn-outline" style={{ marginBottom: '0.6rem' }} onClick={() => { setOpenPanel(null); recenterMap(); }}>Re-centre map</button>
+            <button className="btn btn-danger" onClick={logout}>Log out</button>
+          </div>
+        </div>
+      )}
+
+      {selectedZoneId && zonePanelInfo && (
+        <div style={{
+          position: 'absolute', bottom: 80, left: 12, right: 12, zIndex: 1100,
+          background: 'var(--surface)', border: '1.5px solid var(--border-strong)', borderRadius: 18, padding: '1.1rem',
+          maxHeight: '60%', overflowY: 'auto'
+        }}>
+          <div className="wj-zone-header">
+            <div>
+              <h2 className="wj-zone-title">{zonePanelInfo.zoneName}</h2>
+            </div>
+            <button className="btn btn-outline btn-sm" onClick={() => setSelectedZoneId(null)}>Close</button>
+          </div>
+
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>Queue ({zonePanelInfo.queue.length})</div>
+            {zonePanelInfo.queue.length === 0 && <p style={{ color: 'var(--cream-dim)', fontSize: '0.85rem', margin: 0 }}>No drivers queued.</p>}
+            {zonePanelInfo.queue.map((d, i) => (
+              <div key={d.id} className={`wj-driver-row${d.id === driverId ? ' me' : ''}`}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <span className="num">{i + 1}</span>
+                  <span className="name">{d.id === driverId ? 'You' : d.id.replace(/^DRV-/, '')}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>Open bids ({zonePanelInfo.bids.length})</div>
+            {zonePanelInfo.bids.length === 0 && <p style={{ color: 'var(--cream-dim)', fontSize: '0.85rem', margin: 0 }}>No open bids in this zone.</p>}
+            {zonePanelInfo.bids.map(job => (
+              <div key={job.jobId} className="card" style={{ padding: '0.7rem', fontSize: '0.85rem' }}>
+                <div style={{ fontWeight: 700 }}>{formatCurrency(job.fare)} · {job.vehicleType?.toUpperCase()}</div>
+                <div style={{ color: 'var(--cream-dim)', fontSize: '0.8rem' }}>{job.pickupAddress} → {job.dropoffAddress}</div>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>Future bookings ({zonePanelInfo.futures.length})</div>
+            {zonePanelInfo.futures.length === 0 && <p style={{ color: 'var(--cream-dim)', fontSize: '0.85rem', margin: 0 }}>No future bookings in this zone.</p>}
+            {zonePanelInfo.futures.map(job => (
+              <div key={job.jobId} className="card" style={{ padding: '0.7rem', fontSize: '0.85rem' }}>
+                <div style={{ fontWeight: 700 }}>{new Date(job.pickupTime).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                <div style={{ color: 'var(--cream-dim)', fontSize: '0.8rem' }}>{job.pickupAddress} → {job.dropoffAddress}</div>
+                <div style={{ fontWeight: 800 }}>{formatCurrency(job.fare)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {myLocation && (
+        <button
+          onClick={recenterMap}
+          style={{
+            position: 'absolute', bottom: 90, right: 14, zIndex: 1000,
+            width: 44, height: 44, borderRadius: '50%',
+            background: 'var(--surface)', color: 'var(--gold)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 0, margin: 0,
+            border: `2px solid ${followMe ? 'var(--gold)' : 'var(--border-strong)'}`
+          }}
+          title="Re-centre on my location"
+        >
+          <NavIcon.locate width="20" height="20" />
+        </button>
+      )}
+    </div>
+  );
+}
