@@ -453,7 +453,9 @@ function DriverPageContent() {
     function sendLocation(lat, lng, zone, accuracy) {
       api('driver/location', { lat, lng, zone, accuracy }, driverAuth())
         .then(() => { lastLocationUpdateRef.current = Date.now(); })
-        .catch(() => {});
+        .catch(err => {
+          if (err && err.message) setLocationError('Location send failed: ' + err.message);
+        });
     }
 
     function handlePosition(position) {

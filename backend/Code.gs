@@ -527,12 +527,14 @@ function setDriverAvailability(body, driverId) {
 }
 
 function updateDriverLocation(body, driverId) {
+  Logger.log('updateDriverLocation: driverId=%s lat=%s lng=%s', driverId, body ? body.lat : null, body ? body.lng : null);
   if (!driverId) throw new Error('No driver ID');
   const { lat, lng } = body || {};
   if (lat == null || lng == null) throw new Error('Missing coordinates');
   const d = findDriverById(driverId);
   if (!d) throw new Error('Driver not found');
   updateDriver(driverId, { last_lat: lat, last_lng: lng, last_location_at: new Date().toISOString(), zone: getZone(lat, lng) });
+  Logger.log('updateDriverLocation: driver %s location updated, zone=%s', driverId, getZone(lat, lng));
   allocatePendingAsapJobs();
   return { ok: true };
 }
