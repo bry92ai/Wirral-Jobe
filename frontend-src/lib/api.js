@@ -47,6 +47,11 @@ export async function api(method, body = {}, extraHeaders = {}) {
     httpMethod = 'POST';
   }
   const res = await fetchWithTimeout(url, { method: httpMethod, headers, body: reqBody });
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Unexpected response from server (${res.status}). Please try again.`);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
@@ -64,6 +69,11 @@ export async function apiGet(path, extraHeaders = {}) {
     headers = extraHeaders;
   }
   const res = await fetchWithTimeout(url, { headers });
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    await res.text().catch(() => '');
+    throw new Error(`Unexpected response from server (${res.status}). Please try again.`);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
