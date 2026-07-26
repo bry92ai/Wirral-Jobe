@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { api } from '../lib/api.js';
+import { api, apiGet } from '../lib/api.js';
 import { calculateFare, calculateAirportFare, getTimeOfDay } from '../lib/fare.js';
 import { distanceMiles } from '../lib/geo.js';
 import { loadGoogleMapsScript } from '../lib/maps.js';
@@ -224,6 +224,7 @@ export default function BookingPage() {
   const [fetchingPredictions, setFetchingPredictions] = useState(false);
 
   const [result, setResult] = useState(null);
+  const [trackingJob, setTrackingJob] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [clientSecret, setClientSecret] = useState(null);
@@ -252,6 +253,23 @@ export default function BookingPage() {
   function goBack() {
     window.history.back();
   }
+
+  useEffect(() => {
+    if (screen !== 'success' || !result?.trackingToken) {
+      setTrackingJob(null);
+      return;
+    }
+    let alive = true;
+    async function loadTracking() {
+      try {
+        const data = await apiGet(`/tracking/${result.trackingToken}`);
+        if (alive) setTrackingJob(data);
+      } catch {}
+    }
+    loadTracking();
+    const id = setInterval(loadTracking, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, [screen, result?.trackingToken]);
 
   useEffect(() => {
     const currentState = window.history.state;
@@ -883,13 +901,38 @@ export default function BookingPage() {
         );
 
       case 'success':
+        const allocated = trackingJob && trackingJob.status !== 'NEW' && trackingJob.status !== 'CANCELLED';
+        const trackingLabel = {
+          NEW: 'Finding a driver',
+          ASSIGNED: 'Driver assigned',
+          ON_WAY: 'Driver on the way',
+          ARRIVED: 'Driver has arrived',
+          POB: 'Journey in progress',
+          COMPLETE: 'Journey complete',
+          CANCELLED: 'Booking cancelled'
+        }[trackingJob?.status] || (isFuture ? 'Booking confirmed' : 'Finding a driver…');
         return (
           <div style={{ textAlign: 'center' }}>
             <div style={{ width: 60, height: 60, borderRadius: '50%', border: '2px solid var(--green)', color: 'var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.1rem' }}><Icon.check /></div>
             {panelTitle('Booking confirmed')}
             <p style={{ color: 'var(--cream-dim)', fontSize: '0.9rem', margin: '0 0 1rem' }}>
-              {isAirport && airportTripType === 'return' ? 'Both legs of your airport transfer are booked.' : (isFuture ? `Your ${vehicleType === 'mpv' ? 'MPV' : 'estate car'} is booked for ${new Date(pickupTime).toLocaleString()}.` : 'We are allocating a driver now.')}
+              {isAirport && airportTripType === 'return'
+                ? 'Both legs of your airport transfer are booked.'
+                : (isFuture
+                    ? `Your ${vehicleType === 'mpv' ? 'MPV' : 'estate car'} is booked for ${new Date(pickupTime).toLocaleString()}.`
+                    : (allocated
+                        ? <><span style={{ color: 'var(--green)', fontWeight: 800 }}>{trackingLabel}</span><br />{trackingJob.driverId && `Driver ${trackingJob.driverId}`}{trackingJob.driverLocationAt && <small style={{ display: 'block', marginTop: 4, color: 'var(--cream-dim)' }}>Location updated {new Date(trackingJob.driverLocationAt).toLocaleTimeString()}</small>}</>
+                        : 'We are allocating a driver now.'))}
             </p>
+            {result && !isFuture && (
+              <button
+                onClick={() => window.location.href = `/track/${result.trackingToken}`}
+                className="btn btn-primary"
+                style={{ marginBottom: '1rem' }}
+              >
+                Track your driver live
+              </button>
+            )}
             {result && (
               <div className="wj-info-grid" style={{ textAlign: 'left', gridTemplateColumns: '1fr' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
