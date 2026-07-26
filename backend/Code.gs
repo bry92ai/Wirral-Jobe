@@ -609,11 +609,18 @@ function updateJob(id, updates) {
 // ---------- Booking ----------
 
 function allocateImmediateJob(jobId) {
+  Logger.log('allocateImmediateJob: jobId=%s', jobId);
   const job = findJobById(jobId);
-  if (!job || job.status !== 'NEW') return;
+  if (!job || job.status !== 'NEW') {
+    Logger.log('allocateImmediateJob: job not found or status=%s', job ? job.status : 'null');
+    return;
+  }
   if (offerRowIndex(jobId) < 0) {
+    Logger.log('allocateImmediateJob: no existing offer, starting offer');
     startOffer(jobId, Number(job.pickup_lat), Number(job.pickup_lng));
     writeAudit('system', '', 'job_offered', 'job', jobId, {});
+  } else {
+    Logger.log('allocateImmediateJob: offer already exists');
   }
 }
 
@@ -645,7 +652,9 @@ function createBooking(body) {
   if (Number.isNaN(pickupTime.getTime()) || pickupTime.getTime() < Date.now() - 60000) throw new Error('Please choose a valid pickup time');
   const isFutureBooking = pickupTime.getTime() > Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
   const paymentRequired = squarePaymentsEnabled();
+  Logger.log('createBooking: jobId=%s isFuture=%s paymentRequired=%s', jobId, isFutureBooking, paymentRequired);
   if (!isFutureBooking && !paymentRequired) {
+    Logger.log('createBooking: starting offer immediately for job %s', jobId);
     startOffer(jobId, p.pickupLat || 0, p.pickupLng || 0);
   }
 
@@ -683,6 +692,7 @@ function createBooking(body) {
 
 function confirmBooking(body) {
   const { jobId, sourceId } = body || {};
+  Logger.log('confirmBooking: jobId=%s sourceId=%s', jobId, sourceId ? 'present' : 'missing');
   if (!jobId) throw new Error('Missing jobId');
   const job = findJobById(jobId);
   if (!job) throw new Error('Job not found');
@@ -736,8 +746,13 @@ function setJobStatus(jobId, body, driverId) {
 function getOffers() { return rowsToObjects(getOffersSheet(), OFFER_HEADERS); }
 
 function startOffer(jobId, pickupLat, pickupLng) {
+  Logger.log('startOffer: jobId=%s lat=%s lng=%s', jobId, pickupLat, pickupLng);
   const driver = findNextQueuedDriver(pickupLat, pickupLng, []);
-  if (!driver) return;
+  if (!driver) {
+    Logger.log('startOffer: no queued driver found for job %s', jobId);
+    return;
+  }
+  Logger.log('startOffer: offering job %s to driver %s', jobId, driver.id);
   const offered = JSON.stringify([driver.id]);
   const expiresAt = Date.now() + 60000;
   getOffersSheet().appendRow([jobId, driver.id, offered, expiresAt, pickupLat, pickupLng]);
