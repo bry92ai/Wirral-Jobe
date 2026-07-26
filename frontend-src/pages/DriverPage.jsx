@@ -6,6 +6,26 @@ import { distanceMiles } from '../lib/geo.js';
 import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg } from '../lib/leaflet.js';
 import logo from '../assets/logo.jpg';
 
+function playOfferSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    if (ctx.state === 'suspended') ctx.resume();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.3);
+  } catch {}
+}
+
 const NavIcon = {
   map: (props) => (<svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 3 3 5v16l6-2 6 2 6-2V3l-6 2-6-2z" /><path d="M9 3v16M15 5v16" /></svg>),
   bids: (props) => (<svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2h12v6l-6 5-6-5V2z" /><path d="M6 22h12v-6l-6-5-6 5v6z" /></svg>),
@@ -446,6 +466,14 @@ function DriverPageContent() {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [loggedIn]);
+
+  const previousOfferCountRef = useRef(0);
+  useEffect(() => {
+    if (offers.length > 0 && previousOfferCountRef.current === 0) {
+      playOfferSound();
+    }
+    previousOfferCountRef.current = offers.length;
+  }, [offers]);
 
   useEffect(() => {
     if (!loggedIn || !navigator.geolocation) return;
