@@ -49,7 +49,7 @@ function getZoneStyle(feature, currentZoneId, selectedZoneId) {
 function formatCurrency(n) { return `£${Number(n || 0).toFixed(2)}`; }
 function formatPhone(tel) {
   if (!tel) return null;
-  const cleaned = tel.replace(/\s/g, '');
+  const cleaned = String(tel).replace(/\s/g, '');
   return cleaned.startsWith('0') ? `+44${cleaned.slice(1)}` : cleaned;
 }
 function directionsUrl(address, lat, lng) {
@@ -840,7 +840,7 @@ function DriverPageContent() {
               <div key={d.id} className={`wj-driver-row${d.id === driverId ? ' me' : ''}`}>
                 <div style={{ display: 'flex', alignItems: 'center' }}>
                   <span className="num">{i + 1}</span>
-                  <span className="name">{d.id === driverId ? 'You' : d.id.replace(/^DRV-/, '')}</span>
+                  <span className="name">{d.id === driverId ? 'You' : String(d.id || '').replace(/^DRV-/, '')}</span>
                 </div>
               </div>
             ))}
