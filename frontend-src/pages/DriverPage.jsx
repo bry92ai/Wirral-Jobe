@@ -734,7 +734,7 @@ function DriverPageContent() {
       )}
 
       {activeJob && (
-        <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, zIndex: 1000 }}>
+        <div style={{ position: 'absolute', bottom: 72, left: 12, right: 12, zIndex: 1000, maxHeight: '55vh', overflowY: 'auto' }}>
           <div className="card" style={{ padding: '1rem', borderRadius: 18, border: '2px solid var(--gold)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
               <span className={`badge status-${activeJob.status}`}>{STATUS_LABELS[activeJob.status] || activeJob.status}</span>
