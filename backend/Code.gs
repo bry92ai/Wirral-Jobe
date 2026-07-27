@@ -359,7 +359,7 @@ function getAllDrivers() {
     vehicle_make_model_colour: d.vehicle_make_model_colour, reg_last_3: d.reg_last_3,
     expiry_date: d.expiry_date, badge_number: d.badge_number, zone: d.zone, commission_rate: Number(d.commission_rate) || 0,
     settle_balance: Number(d.settle_balance) || 0, last_lat: Number(d.last_lat) || null, last_lng: Number(d.last_lng) || null,
-    status: d.status
+    status: d.status, letter: getDriverLetter(d.id) || ''
   }));
 }
 function findDriverById(id) { return getDrivers().find(d => d.id === id); }
@@ -1230,7 +1230,7 @@ function adminAssign(body) {
 }
 
 function createAdminDriver(body) {
-  const { id, name, phone, pin, vehicle_type, license_type, vehicle_make_model_colour, reg_last_3, expiry_date, badge_number, commission_rate } = body || {};
+  const { id, name, phone, pin, vehicle_type, license_type, vehicle_make_model_colour, reg_last_3, expiry_date, badge_number, commission_rate, letter } = body || {};
   if (!id || !name || !phone || !pin || !vehicle_type) throw new Error('Missing driver fields');
   const now = new Date().toISOString();
   const driver = {
@@ -1241,13 +1241,14 @@ function createAdminDriver(body) {
   };
   getDriversSheet().appendRow(DRIVER_HEADERS.map(header => driver[header] !== undefined ? driver[header] : ''));
   SpreadsheetApp.flush();
+  if (letter) setDriverLetter(id, letter);
   return { ok: true, driverId: id };
 }
 
 function updateAdminDriver(id, body) {
   const d = findDriverById(id);
   if (!d) throw new Error('Driver not found');
-  const { name, phone, vehicle_type, license_type, vehicle_make_model_colour, reg_last_3, expiry_date, badge_number, commission_rate } = body || {};
+  const { name, phone, vehicle_type, license_type, vehicle_make_model_colour, reg_last_3, expiry_date, badge_number, commission_rate, letter } = body || {};
   updateDriver(id, {
     name: name !== undefined ? name : d.name,
     phone: phone !== undefined ? phone : d.phone,
@@ -1259,6 +1260,7 @@ function updateAdminDriver(id, body) {
     badge_number: badge_number !== undefined ? badge_number : d.badge_number,
     commission_rate: commission_rate !== undefined ? Number(commission_rate) || 0 : Number(d.commission_rate) || 0
   });
+  if (letter !== undefined) setDriverLetter(id, letter);
   return { ok: true, driverId: id };
 }
 

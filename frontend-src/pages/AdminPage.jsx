@@ -11,7 +11,7 @@ export default function AdminPage() {
   const [error, setError] = useState('');
   const [token, setToken] = useState(localStorage.getItem('adminToken') || '');
   const [password, setPassword] = useState('');
-  const [newDriver, setNewDriver] = useState({ id: '', name: '', phone: '', pin: '', vehicle_type: 'car', license_type: 'private_hire', vehicle_make_model_colour: '', reg_last_3: '', expiry_date: '', badge_number: '', commission_rate: '' });
+  const [newDriver, setNewDriver] = useState({ id: '', name: '', phone: '', pin: '', vehicle_type: 'car', license_type: 'private_hire', vehicle_make_model_colour: '', reg_last_3: '', expiry_date: '', badge_number: '', commission_rate: '', letter: '' });
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [mapReady, setMapReady] = useState(false);
@@ -67,7 +67,7 @@ export default function AdminPage() {
     setError('');
     try {
       await api('admin/drivers', newDriver, { 'x-admin-token': token });
-      setNewDriver({ id: '', name: '', phone: '', pin: '', vehicle_type: 'car', license_type: 'private_hire', vehicle_make_model_colour: '', reg_last_3: '', expiry_date: '', badge_number: '', commission_rate: '' });
+      setNewDriver({ id: '', name: '', phone: '', pin: '', vehicle_type: 'car', license_type: 'private_hire', vehicle_make_model_colour: '', reg_last_3: '', expiry_date: '', badge_number: '', commission_rate: '', letter: '' });
       load();
     } catch (err) {
       setError(err.message);
@@ -160,7 +160,8 @@ export default function AdminPage() {
       reg_last_3: driver.reg_last_3 || '',
       expiry_date: driver.expiry_date || '',
       badge_number: driver.badge_number || '',
-      commission_rate: driver.commission_rate ?? ''
+      commission_rate: driver.commission_rate ?? '',
+      letter: driver.letter || ''
     });
   }
 
@@ -298,6 +299,16 @@ export default function AdminPage() {
               <label>Commission %</label>
               <input type="number" min={0} max={100} step="0.01" value={newDriver.commission_rate} onChange={e => setNewDriver({ ...newDriver, commission_rate: e.target.value })} placeholder="e.g. 10" />
             </div>
+            <div className="form-group">
+              <label>Future bracket</label>
+              <select value={newDriver.letter} onChange={e => setNewDriver({ ...newDriver, letter: e.target.value })}>
+                <option value="">None</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+                <option value="Pool">Pool</option>
+              </select>
+            </div>
           </div>
           <button type="submit">Add driver</button>
         </form>
@@ -377,6 +388,15 @@ export default function AdminPage() {
                 <div className="form-group"><label>Exp date</label><input type="date" value={editForm.expiry_date} onChange={e => setEditForm({ ...editForm, expiry_date: e.target.value })} /></div>
                 <div className="form-group"><label>Badge</label><input value={editForm.badge_number} onChange={e => setEditForm({ ...editForm, badge_number: e.target.value })} /></div>
                 <div className="form-group"><label>Commission %</label><input type="number" value={editForm.commission_rate} onChange={e => setEditForm({ ...editForm, commission_rate: e.target.value })} /></div>
+                <div className="form-group"><label>Future bracket</label>
+                  <select value={editForm.letter} onChange={e => setEditForm({ ...editForm, letter: e.target.value })}>
+                    <option value="">None</option>
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                    <option value="Pool">Pool</option>
+                  </select>
+                </div>
               </div>
               <button onClick={() => saveEdit(d.id)}>Save</button>
               <button className="secondary" onClick={() => setEditingId(null)} style={{ marginLeft: 8 }}>Cancel</button>
@@ -385,7 +405,7 @@ export default function AdminPage() {
             <div>
               <p><strong>{d.id}</strong> — {d.name} <span className={`badge ${d.status === 'AVAILABLE' ? 'status-COMPLETE' : 'status-CANCELLED'}`}>{d.status}</span> <button className="secondary" style={{ marginLeft: 8, marginTop: 0, padding: '0.2rem 0.5rem' }} onClick={() => startEdit(d)}>Edit</button></p>
               <p style={{ fontSize: '0.85rem' }}>
-                {d.license_type} | {d.vehicle_type} | {d.zone || 'no zone'} | {d.vehicle_make_model_colour} | Reg …{d.reg_last_3} | Exp {d.expiry_date} | Badge {d.badge_number} | {d.phone} | Commission {d.commission_rate || 0}%
+                {d.license_type} | {d.vehicle_type} | {d.zone || 'no zone'} | {d.vehicle_make_model_colour} | Reg …{d.reg_last_3} | Exp {d.expiry_date} | Badge {d.badge_number} | {d.phone} | Commission {d.commission_rate || 0}% | Future bracket: {d.letter || 'None'}
               </p>
               <p style={{ fontSize: '0.85rem' }}>
                 <strong>Owed settle: £{Number(d.settle_balance || 0).toFixed(2)}</strong>
