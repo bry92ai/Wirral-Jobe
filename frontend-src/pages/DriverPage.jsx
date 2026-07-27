@@ -96,6 +96,7 @@ function DriverPageContent() {
   const [openPanel, setOpenPanel] = useState(null);
   const [bidBoard, setBidBoard] = useState([]);
   const [selectedBid, setSelectedBid] = useState(null);
+  const [bidTab, setBidTab] = useState('open');
   const [myBids, setMyBids] = useState([]);
   const [futureBookings, setFutureBookings] = useState([]);
   const [futureTab, setFutureTab] = useState('upcoming');
@@ -277,7 +278,7 @@ function DriverPageContent() {
   async function acceptFutureBooking(jobId) {
     setLoading(true); setError('');
     try {
-      await api(`driver/future-bookings/${jobId}/accept`, {}, { 'x-driver-id': driverId });
+      await api(`driver/future-bookings/${jobId}/accept`, {}, driverAuth());
       await Promise.all([loadFutureBookings(), loadJobs()]);
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
@@ -871,35 +872,66 @@ function DriverPageContent() {
             <div style={{ overflowY: 'auto', padding: '0.9rem 1.1rem 1.75rem' }}>
               {openPanel === 'bids' && (
                 <div className="wj-bids-screen">
-                  {bidBoard.length === 0 && <p className="wj-bids-empty">No open jobs to bid on right now.</p>}
-                  {bidBoard.map(job => {
-                    const pickupZone = findZone(job.pickupLat, job.pickupLng);
-                    const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
-                    const runningMiles = myLocation ? distanceMiles(myLocation.lat, myLocation.lng, job.pickupLat, job.pickupLng) : null;
-                    const fareMiles = distanceMiles(job.pickupLat, job.pickupLng, job.dropoffLat, job.dropoffLng);
-                    return (
-                      <article key={job.jobId} className="wj-bid-job">
-                        <div className="wj-bid-heading"><div><h3>New bid</h3><p>Review the job details below and ask for it if you're available.</p></div><span className="wj-bid-availability"><i />Online<small>{queueInfo.zoneName}</small></span></div>
-                        <div className="wj-bid-details">
-                          <div><span className="wj-bid-icon">●</span><p>Running distance<strong>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</strong><small>Distance from you to pickup</small></p></div>
-                          <div><span className="wj-bid-icon">£</span><p>Maximum fare amount<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
-                          <div><span className="wj-bid-icon">╱</span><p>Fare distance<strong>{fareMiles.toFixed(1)} mi</strong><small>Estimated journey distance</small></p></div>
-                          <div><span className="wj-bid-icon">◷</span><p>Vehicle<strong>{job.vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</strong><small>Requested vehicle</small></p></div>
-                          <div><span className="wj-bid-icon">↑</span><p>Pickup zone<strong>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : job.pickupAddress}</strong><small>{job.pickupAddress}</small></p></div>
-                          <div><span className="wj-bid-icon">↓</span><p>Destination zone<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : job.dropoffAddress}</strong><small>{job.dropoffAddress}</small></p></div>
-                        </div>
-                        {job.myBid ? (
-                          <div className="wj-bid-status">You asked for this job at {formatCurrency(job.myBid.amount)}.</div>
-                        ) : (
-                          <div className="wj-bid-actions">
-                            <button onClick={() => placeBid(job.jobId, job.fare)} disabled={loading} className="wj-bid-ask">✋ <span><strong>Ask for this job</strong><small>Ask to be considered for this job</small></span></button>
-                            <button onClick={() => setBidBoard(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading} className="wj-bid-decline">× <span><strong>Not for me</strong><small>Skip this job</small></span></button>
-                          </div>
-                        )}
-                        <p className="wj-bid-disclaimer">ⓘ Asking for the job does not guarantee assignment. The system selects the most suitable driver based on location, ETA, queue position and availability.</p>
-                      </article>
-                    );
-                  })}
+                  <div className="wj-future-tabs" style={{ marginBottom: '0.9rem' }}>
+                    <button className={bidTab === 'open' ? 'active' : ''} onClick={() => setBidTab('open')}>Open jobs</button>
+                    <button className={bidTab === 'mine' ? 'active' : ''} onClick={() => setBidTab('mine')}>My bids</button>
+                  </div>
+                  {bidTab === 'open' && (
+                    <>
+                      {bidBoard.length === 0 && <p className="wj-bids-empty">No open jobs to bid on right now.</p>}
+                      {bidBoard.map(job => {
+                        const pickupZone = findZone(job.pickupLat, job.pickupLng);
+                        const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
+                        const runningMiles = myLocation ? distanceMiles(myLocation.lat, myLocation.lng, job.pickupLat, job.pickupLng) : null;
+                        const fareMiles = distanceMiles(job.pickupLat, job.pickupLng, job.dropoffLat, job.dropoffLng);
+                        return (
+                          <article key={job.jobId} className="wj-bid-job">
+                            <div className="wj-bid-heading"><div><h3>New bid</h3><p>Review the job details below and ask for it if you're available.</p></div><span className="wj-bid-availability"><i />Online<small>{queueInfo.zoneName}</small></span></div>
+                            <div className="wj-bid-details">
+                              <div><span className="wj-bid-icon">●</span><p>Running distance<strong>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</strong><small>Distance from you to pickup</small></p></div>
+                              <div><span className="wj-bid-icon">£</span><p>Maximum fare amount<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
+                              <div><span className="wj-bid-icon">╱</span><p>Fare distance<strong>{fareMiles.toFixed(1)} mi</strong><small>Estimated journey distance</small></p></div>
+                              <div><span className="wj-bid-icon">◷</span><p>Vehicle<strong>{job.vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</strong><small>Requested vehicle</small></p></div>
+                              <div><span className="wj-bid-icon">↑</span><p>Pickup zone<strong>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : job.pickupAddress}</strong><small>{job.pickupAddress}</small></p></div>
+                              <div><span className="wj-bid-icon">↓</span><p>Destination zone<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : job.dropoffAddress}</strong><small>{job.dropoffAddress}</small></p></div>
+                            </div>
+                            {job.myBid ? (
+                              <div className="wj-bid-status">You asked for this job at {formatCurrency(job.myBid.amount)}.</div>
+                            ) : (
+                              <div className="wj-bid-actions">
+                                <button onClick={() => placeBid(job.jobId, job.fare)} disabled={loading} className="wj-bid-ask">✋ <span><strong>Ask for this job</strong><small>Ask to be considered for this job</small></span></button>
+                                <button onClick={() => setBidBoard(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading} className="wj-bid-decline">× <span><strong>Not for me</strong><small>Skip this job</small></span></button>
+                              </div>
+                            )}
+                            <p className="wj-bid-disclaimer">ⓘ Asking for the job does not guarantee assignment. The system selects the most suitable driver based on location, ETA, queue position and availability.</p>
+                          </article>
+                        );
+                      })}
+                    </>
+                  )}
+
+                  {bidTab === 'mine' && (
+                    <>
+                      {myBids.length === 0 && <p className="wj-bids-empty">You haven't asked for any jobs yet.</p>}
+                      {myBids.map(bid => {
+                        const job = bid.job || {};
+                        const pickupZone = findZone(job.pickupLat, job.pickupLng);
+                        const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
+                        const accepted = job.status && job.status !== 'BIDDING';
+                        return (
+                          <article key={bid.job_id || bid.created_at} className="wj-bid-job">
+                            <div className="wj-bid-heading"><div><h3>Your bid</h3><p>{accepted ? 'Assigned to you' : 'Waiting to be assigned'}</p></div><span className="wj-bid-availability"><i />{formatCurrency(bid.amount)}</span></div>
+                            <div className="wj-bid-details">
+                              <div><span className="wj-bid-icon">●</span><p>Pickup<strong>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : job.pickupAddress}</strong><small>{job.pickupAddress}</small></p></div>
+                              <div><span className="wj-bid-icon">↓</span><p>Drop-off<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : job.dropoffAddress}</strong><small>{job.dropoffAddress}</small></p></div>
+                              <div><span className="wj-bid-icon">£</span><p>Fare<strong>{formatCurrency(job.fare)}</strong><small>Maximum charge</small></p></div>
+                            </div>
+                            {accepted && <div className="wj-bid-status">Job assigned — check your active jobs.</div>}
+                          </article>
+                        );
+                      })}
+                    </>
+                  )}
                 </div>
               )}
 

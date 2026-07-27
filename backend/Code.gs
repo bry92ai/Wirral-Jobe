@@ -94,6 +94,8 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'driver/bid-board') return getBidBoard(requireDriver(driverId, driverToken).id);
   if (r === 'driver/my-bids') return getMyBids(requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'bid-board' && parts[3] === 'bid') return placeBid(parts[2], body, requireDriver(driverId, driverToken).id);
+  if (r === 'driver/future-bookings') return getDriverFutureBookings(requireDriver(driverId, driverToken).id);
+  if (parts[0] === 'driver' && parts[1] === 'future-bookings' && parts[3] === 'accept') return acceptFutureBooking(parts[2], requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'jobs' && parts[3] === 'status') return setJobStatus(parts[2], body, requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'jobs' && parts[3] === 'vehicle') return changeJobVehicle(parts[2], body, requireDriver(driverId, driverToken).id);
   if (r === 'driver/location') return updateDriverLocation(body, requireDriver(driverId, driverToken).id);
@@ -591,6 +593,31 @@ function jobResponse(job) {
 function getDriverJobs(driverId) {
   if (!driverId) throw new Error('No driver ID');
   return { jobs: getJobs().filter(j => j.driver_id === driverId).map(jobResponse) };
+}
+
+function getDriverFutureBookings(driverId) {
+  if (!driverId) throw new Error('No driver ID');
+  const cutoff = Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
+  const jobs = getJobs().filter(j => {
+    const pickupTime = new Date(j.pickup_time).getTime();
+    const isFuture = pickupTime > cutoff;
+    return (j.status === 'SCHEDULED' || (j.status === 'NEW' && isFuture)) && (j.driver_id === '' || j.driver_id === driverId);
+  });
+  return { jobs: jobs.map(jobResponse) };
+}
+
+function acceptFutureBooking(jobId, driverId) {
+  if (!driverId) throw new Error('No driver ID');
+  const job = findJobById(jobId);
+  if (!job) throw new Error('Job not found');
+  if (job.driver_id && job.driver_id !== driverId) throw new Error('Already assigned to another driver');
+  if (!['SCHEDULED', 'NEW'].includes(job.status)) throw new Error('Job is no longer a future booking');
+  const driver = findDriverById(driverId);
+  if (!driver) throw new Error('Driver not found');
+  const now = new Date().toISOString();
+  updateJob(jobId, { driver_id: driverId, commission_rate: Number(driver.commission_rate) || 0, updated_at: now });
+  writeAudit('driver', driverId, 'future_booking_accepted', 'job', jobId, {});
+  return { ok: true, jobId, driverId };
 }
 
 function getTracking(token) {
