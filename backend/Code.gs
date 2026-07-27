@@ -844,15 +844,47 @@ function offerRowIndex(jobId) {
   return findRowIndex(getOffersSheet(), row => row[0] === jobId);
 }
 
+const BIDDING_COUNTDOWN_DRIVER = '__BIDDING__';
+
+function resolveBidWinner(jobId, pickupLat, pickupLng) {
+  const allBids = getBids().filter(b => b.job_id === jobId);
+  if (allBids.length === 0) return null;
+  const drivers = getDrivers();
+  const scored = allBids.map(b => {
+    const d = drivers.find(drv => drv.id === b.driver_id);
+    const available = d && d.status === 'AVAILABLE';
+    let distance = Infinity;
+    if (available && d.last_lat !== '' && d.last_lng !== '') {
+      distance = distanceMiles(pickupLat, pickupLng, Number(d.last_lat), Number(d.last_lng));
+    }
+    const waiting = d && d.available_since ? new Date(d.available_since).getTime() : Infinity;
+    return { driverId: b.driver_id, distance, waiting, createdAt: new Date(b.created_at).getTime() };
+  });
+  scored.sort((a, b) => a.distance - b.distance || a.waiting - b.waiting || a.createdAt - b.createdAt);
+  return scored[0].driverId;
+}
+
 function advanceOffers() {
   const sheet = getOffersSheet();
   const offers = getOffers();
   const now = Date.now();
   offers.forEach(offer => {
     if (Number(offer.expiresAt) > now) return;
+    const idx = offerRowIndex(offer.jobId);
+    if (offer.currentDriverId === BIDDING_COUNTDOWN_DRIVER) {
+      const winnerId = resolveBidWinner(offer.jobId, Number(offer.pickupLat), Number(offer.pickupLng));
+      const now = new Date().toISOString();
+      if (winnerId) {
+        startOfferToDriver(offer.jobId, Number(offer.pickupLat), Number(offer.pickupLng), winnerId);
+        updateJob(offer.jobId, { status: 'OFFERED', updated_at: now });
+      } else {
+        updateJob(offer.jobId, { status: 'BIDDING', updated_at: now });
+      }
+      sheet.deleteRow(idx);
+      return;
+    }
     const offered = JSON.parse(offer.offeredDrivers || '[]');
     const next = findNextQueuedDriver(Number(offer.pickupLat), Number(offer.pickupLng), offered);
-    const idx = offerRowIndex(offer.jobId);
     if (!next) {
       sheet.deleteRow(idx);
     } else {
@@ -951,12 +983,23 @@ function placeBid(jobId, body, driverId) {
   const driver = findDriverById(driverId);
   if (!driver) throw new Error('Driver not found');
   if (job.status !== 'BIDDING') throw new Error('Job is no longer open for bids');
-  if (offerRowIndex(jobId) >= 0) throw new Error('This job is already being offered to another driver');
+  const existingBid = getBids().some(b => b.job_id === jobId && b.driver_id === driverId);
+  if (existingBid) throw new Error('You have already asked for this job');
   const now = new Date().toISOString();
   getBidsSheet().appendRow([now, jobId, driverId, amount, 'pending']);
-  startOfferToDriver(jobId, Number(job.pickup_lat), Number(job.pickup_lng), driverId);
-  writeAudit('driver', driverId, 'bid_placed', 'job', jobId, { amount });
-  return { ok: true, status: 'OFFERED', driverId, fare: Number(job.fare) || 0 };
+  const offerIdx = offerRowIndex(jobId);
+  if (offerIdx < 0) {
+    getOffersSheet().appendRow([jobId, BIDDING_COUNTDOWN_DRIVER, '[]', Date.now() + 60000, Number(job.pickup_lat), Number(job.pickup_lng)]);
+    writeAudit('driver', driverId, 'bid_placed', 'job', jobId, { amount, window: 'started' });
+  } else {
+    const offer = getOffers()[offerIdx - 1];
+    if (Number(offer.expiresAt) <= Date.now()) {
+      advanceOffers();
+    }
+    writeAudit('driver', driverId, 'bid_placed', 'job', jobId, { amount });
+  }
+  SpreadsheetApp.flush();
+  return { ok: true, status: 'BIDDING', driverId, fare: Number(job.fare) || 0 };
 }
 
 // ---------- Allocation ----------
