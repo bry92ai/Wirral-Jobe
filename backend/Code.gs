@@ -10,8 +10,8 @@ function getZone(lat, lng) {
 }
 
 const TARIFF = {
-  car: { day: { firstMile: 4.50, perMile: 2.20 }, night: { firstMile: 5.50, perMile: 2.80 } },
-  mpv: { day: { firstMile: 6.50, perMile: 3.20 }, night: { firstMile: 7.50, perMile: 3.80 } }
+  car: { day: { firstMile: 4.50, perMile: 2.20, waitingPerMinute: 0.30 }, night: { firstMile: 5.50, perMile: 2.80, waitingPerMinute: 0.40 } },
+  mpv: { day: { firstMile: 6.50, perMile: 3.20, waitingPerMinute: 0.45 }, night: { firstMile: 7.50, perMile: 3.80, waitingPerMinute: 0.55 } }
 };
 
 const AIRPORTS = [
@@ -624,6 +624,8 @@ function findJobById(id) { return getJobs().find(j => j.id === id); }
 
 function jobResponse(job) {
   const d = job.driver_id ? findDriverById(job.driver_id) : null;
+  let notes = {};
+  try { notes = JSON.parse(job.notes || '{}'); } catch {}
   return {
     jobId: job.id, status: job.status, driverId: job.driver_id || null,
     driverLat: d ? Number(d.last_lat) || null : null, driverLng: d ? Number(d.last_lng) || null : null,
@@ -637,7 +639,9 @@ function jobResponse(job) {
     commissionRate: Number(job.commission_rate) || 0, commissionAmount: Number(job.commission_amount) || 0,
     paymentStatus: job.payment_status, trackingToken: job.tracking_token,
     createdAt: job.created_at, onWayAt: job.on_way_at, arrivedAt: job.arrived_at,
-    pobAt: job.pob_at, completedAt: job.completed_at
+    pobAt: job.pob_at, completedAt: job.completed_at,
+    pobWaitingRate: Number(notes.pobWaitingRate) || 0,
+    pobMeterStartedAt: notes.pobMeterStartedAt || null
   };
 }
 
@@ -828,7 +832,13 @@ function setJobStatus(jobId, body, driverId) {
   const updates = { status };
   if (status === 'ON_WAY') updates.on_way_at = now;
   if (status === 'ARRIVED') updates.arrived_at = now;
-  if (status === 'POB') updates.pob_at = now;
+  if (status === 'POB') {
+    updates.pob_at = now;
+    const notes = (() => { try { return JSON.parse(job.notes || '{}'); } catch { return {}; } })();
+    notes.pobWaitingRate = getWaitingRate(job.vehicle_type || 'car', now);
+    notes.pobMeterStartedAt = now;
+    updates.notes = JSON.stringify(notes);
+  }
   if (status === 'COMPLETE') updates.completed_at = now;
   updateJob(jobId, updates);
   writeAudit('driver', driverId, 'job_status_changed', 'job', jobId, { from: job.status, to: status });
@@ -1378,6 +1388,11 @@ function getTimeOfDay(date) {
   const minutes = d.getHours() * 60 + d.getMinutes();
   if (minutes >= 21 * 60 || minutes < 5 * 60 + 30) return 'night';
   return 'day';
+}
+function getWaitingRate(vehicleType, date) {
+  const timeOfDay = getTimeOfDay(date);
+  const rates = (TARIFF[vehicleType] && TARIFF[vehicleType][timeOfDay]) ? TARIFF[vehicleType][timeOfDay] : TARIFF.car.day;
+  return Number(rates.waitingPerMinute) || 0;
 }
 
 function shortUuid() {

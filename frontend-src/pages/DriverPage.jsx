@@ -156,6 +156,15 @@ function DriverPageContent() {
 
   const activeJob = useMemo(() => (jobs || []).find(j => !['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(j.status)), [jobs]);
 
+  const liveMeter = useMemo(() => {
+    if (!activeJob || activeJob.status !== 'POB') return null;
+    const start = new Date(activeJob.pobAt || activeJob.pobMeterStartedAt || Date.now()).getTime();
+    const elapsedMs = Math.max(0, now - start);
+    const elapsedMin = elapsedMs / 60000;
+    const waitingRate = Number(activeJob.pobWaitingRate) || 0;
+    return { fare: activeJob.fare + elapsedMin * waitingRate, elapsedMs, waitingRate };
+  }, [activeJob, now]);
+
   const driverZone = (d) => {
     if (d?.zone) return d.zone;
     const lat = Number(d?.lastLat);
@@ -812,6 +821,15 @@ function DriverPageContent() {
               <span className={`badge status-${activeJob.status}`}>{STATUS_LABELS[activeJob.status] || activeJob.status}</span>
               <span style={{ fontWeight: 800, fontSize: '1.2rem' }}>{formatCurrency(activeJob.fare)}</span>
             </div>
+            {liveMeter && (
+              <div style={{ marginBottom: '0.75rem', padding: '0.75rem', border: '1.5px solid var(--gold)', borderRadius: 12, background: 'rgba(244,191,27,0.08)' }}>
+                <div style={{ fontSize: '0.65rem', color: 'var(--gold)', fontWeight: 800, textTransform: 'uppercase' }}>Meter running</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.7rem', color: 'var(--cream)', lineHeight: 1 }}>{formatCurrency(liveMeter.fare)}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--cream-dim)' }}>
+                  Max charge · {Math.floor(liveMeter.elapsedMs / 60000)}m {String(Math.floor((liveMeter.elapsedMs % 60000) / 1000)).padStart(2, '0')}s
+                </div>
+              </div>
+            )}
             <div style={{ marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: '0.35rem' }}>
                 <span className="wj-dot wj-dot-green" style={{ marginTop: 4 }} />
