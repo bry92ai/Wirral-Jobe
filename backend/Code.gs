@@ -605,11 +605,10 @@ function getDriverJobs(driverId) {
 
 function getDriverFutureBookings(driverId) {
   if (!driverId) throw new Error('No driver ID');
-  const cutoff = Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
   const jobs = getJobs().filter(j => {
     const pickupTime = new Date(j.pickup_time).getTime();
-    const isFuture = pickupTime > cutoff;
-    return (j.status === 'SCHEDULED' || (j.status === 'NEW' && isFuture)) && (j.driver_id === '' || j.driver_id === driverId);
+    const isFuture = pickupTime > Date.now();
+    return isFuture && (j.status === 'SCHEDULED' || j.status === 'NEW') && (j.driver_id === '' || j.driver_id === driverId);
   });
   return { jobs: jobs.map(jobResponse) };
 }

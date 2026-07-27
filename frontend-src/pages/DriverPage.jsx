@@ -1013,8 +1013,8 @@ function DriverPageContent() {
                   </div>
                   {(() => {
                     const shownBookings = futureBookings.filter(job => {
-                      if (futureTab === 'upcoming') return job.driverId === driverId;
-                      if (futureTab === 'offered') return !job.driverId;
+                      if (futureTab === 'upcoming') return job.driverId === driverId && job.status !== 'SCHEDULED';
+                      if (futureTab === 'offered') return !job.driverId || (job.driverId === driverId && job.status === 'SCHEDULED');
                       return true;
                     });
                     if (shownBookings.length === 0) return <p className="wj-future-empty">{futureTab === 'offered' ? 'No future offers available right now.' : 'No future bookings available right now.'}</p>;
@@ -1026,11 +1026,12 @@ function DriverPageContent() {
                       const fareMiles = distanceMiles(job.pickupLat, job.pickupLng, job.dropoffLat, job.dropoffLng);
                       const date = new Date(job.pickupTime);
                       const accepted = job.driverId === driverId;
+                      const dispatched = accepted && job.status !== 'SCHEDULED';
                       const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' });
                       const showDate = dateLabel !== lastDate;
                       lastDate = dateLabel;
                       return <div key={job.jobId}>{showDate && <div className="wj-future-date">{dateLabel}</div>}<article className="wj-future-card">
-                        <div className={`wj-future-status ${accepted ? 'accepted' : ''}`}>{accepted ? 'Accepted' : 'Future offer'}</div>
+                        <div className={`wj-future-status ${accepted ? 'accepted' : ''}`}>{accepted ? (dispatched ? 'Assigned to you' : 'Accepted — awaiting dispatch') : 'Future offer'}</div>
                         <div className="wj-future-time"><span>{date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span><div><strong>{job.dropoffAddress}</strong><small>from {job.pickupAddress}</small></div></div>
                         <div className="wj-future-details-grid">
                           <div><span>●</span><p>Running distance<strong>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</strong><small>Distance from you to pickup</small></p></div>
@@ -1039,7 +1040,7 @@ function DriverPageContent() {
                           <div><span>↓</span><p>Destination zone<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : '—'}</strong><small>{job.dropoffAddress}</small></p></div>
                           <div><span>£</span><p>Maximum fare amount<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
                         </div>
-                        {accepted ? <div className="wj-future-accepted">Assigned to you</div> : <div className="wj-future-actions"><button onClick={() => acceptFutureBooking(job.jobId)} disabled={loading}>Accept offer</button><button onClick={() => setFutureBookings(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading}>Pass</button></div>}
+                        {accepted ? <div className="wj-future-accepted">{dispatched ? 'Assigned to you' : 'Accepted — awaiting dispatch'}</div> : <div className="wj-future-actions"><button onClick={() => acceptFutureBooking(job.jobId)} disabled={loading}>Accept offer</button><button onClick={() => setFutureBookings(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading}>Pass</button></div>}
                       </article></div>;
                     });
                   })()}
