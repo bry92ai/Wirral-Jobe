@@ -736,6 +736,11 @@ function createBooking(body) {
     updated_at: new Date().toISOString()
   });
 
+  if (isFutureBooking) {
+    Logger.log('createBooking: starting future offer cycle for job %s', jobId);
+    createFutureOffer(jobId, Number(p.pickupLat) || 0, Number(p.pickupLng) || 0);
+  }
+
   writeAudit(customer ? 'customer' : 'guest', customer ? customer.id : customerPhone, 'booking_created', 'job', jobId, { status: isFutureBooking ? 'SCHEDULED' : 'NEW' });
   return { ok: true, jobId, fare, bookingFee, trackingToken: token, clientSecret: squarePaymentsEnabled() ? 'square' : null };
 }
@@ -933,11 +938,20 @@ function acceptOffer(jobId, driverId) {
   if (row[1] !== driverId) throw new Error('No active offer');
   const driver = findDriverById(driverId);
   if (!driver) throw new Error('Driver not found');
-  updateJob(jobId, { status: 'ASSIGNED', driver_id: driverId, commission_rate: Number(driver.commission_rate) || 0 });
-  updateDriver(driverId, { status: 'BUSY' });
+  const job = findJobById(jobId);
+  const pickupTime = new Date(job?.pickup_time || new Date().toISOString()).getTime();
+  const dispatchNow = pickupTime <= Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
+  const now = new Date().toISOString();
+  updateJob(jobId, {
+    status: dispatchNow ? 'ASSIGNED' : 'SCHEDULED',
+    driver_id: driverId,
+    commission_rate: Number(driver.commission_rate) || 0,
+    updated_at: now
+  });
+  if (dispatchNow) updateDriver(driverId, { status: 'BUSY' });
   sheet.deleteRow(idx);
   SpreadsheetApp.flush();
-  return { ok: true, status: 'ASSIGNED', driverId };
+  return { ok: true, status: dispatchNow ? 'ASSIGNED' : 'SCHEDULED', driverId };
 }
 
 function declineOffer(jobId, driverId) {
@@ -1079,18 +1093,16 @@ function findNextQueuedDriver(pickupLat, pickupLng, excludeIds) {
 // ---------- Future booking allocation ----------
 
 function processFutureBookings() {
-  const cutoff = Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
+  // Offer future bookings to A/B/C tiers as soon as they are booked.
   getJobs().forEach(job => {
     if (job.driver_id) return;
-    const pickupTime = new Date(job.pickup_time).getTime();
-    const isWindowOpen = pickupTime <= cutoff;
-    if (!isWindowOpen) return;
     if (job.status !== 'SCHEDULED' && job.status !== 'NEW') return;
     if (futureOfferRowIndex(job.id) >= 0) return;
     createFutureOffer(job.id, Number(job.pickup_lat), Number(job.pickup_lng));
     writeAudit('system', '', 'future_offer_window_opened', 'job', job.id, { pickupTime: job.pickup_time });
   });
   advanceFutureOffers();
+  dispatchFutureBookings();
 }
 
 function createFutureOffer(jobId, pickupLat, pickupLng) {
@@ -1124,28 +1136,30 @@ function advanceFutureOffer(jobId) {
     offeredLetters: JSON.parse(values[7] || '[]')
   };
   if (offer.currentDriverId) offer.offeredDrivers.push(offer.currentDriverId);
-  if (offer.currentLetter && !offer.offeredLetters.includes(offer.currentLetter)) offer.offeredLetters.push(offer.currentLetter);
 
-  const letters = ['A', 'B', 'C'];
+  const letters = ['A', 'B', 'C', 'POOL'];
   let letter = offer.currentLetter || '';
   while (true) {
     const nextIndex = letter ? letters.indexOf(letter) + 1 : 0;
     if (nextIndex >= letters.length) {
-      sheet.deleteRow(idx);
-      updateJob(jobId, { status: 'NEW', updated_at: new Date().toISOString() });
-      startOffer(jobId, offer.pickupLat, offer.pickupLng);
-      writeAudit('system', '', 'future_offer_exhausted', 'job', jobId, { status: 'NEW' });
+      // POOL exhausted with no available driver; retry in 5 minutes without recreating the offer.
+      sheet.getRange(idx, 2, 1, 4).setValues([['', JSON.stringify(offer.offeredDrivers), Date.now() + 300000, offer.pickupLat]]);
+      sheet.getRange(idx, 7, 1, 2).setValues([['POOL', JSON.stringify(offer.offeredLetters)]]);
+      writeAudit('system', '', 'future_offer_pool_retry', 'job', jobId, { status: 'SCHEDULED' });
       return;
     }
     letter = letters[nextIndex];
-    const driver = findNextEligibleDriver(offer.pickupLat, offer.pickupLng, offer.offeredDrivers, letter);
+    if (offer.offeredLetters.includes(letter)) continue;
+    offer.offeredLetters.push(letter);
+    const driver = letter === 'POOL'
+      ? findNextQueuedDriver(offer.pickupLat, offer.pickupLng, offer.offeredDrivers)
+      : findNextEligibleDriver(offer.pickupLat, offer.pickupLng, offer.offeredDrivers, letter);
     if (driver) {
       sheet.getRange(idx, 2, 1, 4).setValues([[driver.id, JSON.stringify(offer.offeredDrivers), Date.now() + 60000, offer.pickupLat]]);
       sheet.getRange(idx, 7, 1, 2).setValues([[letter, JSON.stringify(offer.offeredLetters)]]);
       writeAudit('system', '', 'future_offered', 'job', jobId, { driverId: driver.id, letter });
       return;
     }
-    offer.offeredLetters.push(letter);
   }
 }
 
@@ -1187,10 +1201,18 @@ function acceptFutureOffer(jobId, driverId) {
   const driver = findDriverById(driverId);
   if (!driver) throw new Error('Driver not found');
   const now = new Date().toISOString();
-  updateJob(jobId, { status: 'SCHEDULED', driver_id: driverId, commission_rate: Number(driver.commission_rate) || 0, updated_at: now });
+  const pickupTime = new Date(job.pickup_time).getTime();
+  const dispatchNow = pickupTime <= Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
+  updateJob(jobId, {
+    status: dispatchNow ? 'ASSIGNED' : 'SCHEDULED',
+    driver_id: driverId,
+    commission_rate: Number(driver.commission_rate) || 0,
+    updated_at: now
+  });
+  if (dispatchNow) updateDriver(driverId, { status: 'BUSY' });
   sheet.deleteRow(idx);
   writeAudit('driver', driverId, 'future_offer_accepted', 'job', jobId, {});
-  return { ok: true, jobId, driverId };
+  return { ok: true, status: dispatchNow ? 'ASSIGNED' : 'SCHEDULED', jobId, driverId };
 }
 
 function declineFutureOffer(jobId, driverId) {
@@ -1202,6 +1224,21 @@ function declineFutureOffer(jobId, driverId) {
   advanceFutureOffer(jobId);
   writeAudit('driver', driverId, 'future_offer_declined', 'job', jobId, {});
   return { ok: true };
+}
+
+function dispatchFutureBookings() {
+  const now = Date.now();
+  const dispatchCutoff = now + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
+  getJobs().forEach(job => {
+    if (!job.driver_id) return;
+    if (job.status !== 'SCHEDULED') return;
+    const pickupTime = new Date(job.pickup_time).getTime();
+    if (pickupTime > dispatchCutoff) return;
+    const driver = findDriverById(job.driver_id);
+    updateJob(job.id, { status: 'ASSIGNED', updated_at: new Date().toISOString() });
+    if (driver) updateDriver(job.driver_id, { status: 'BUSY' });
+    writeAudit('system', '', 'future_booking_dispatched', 'job', job.id, { driverId: job.driver_id });
+  });
 }
 
 // ---------- Admin ----------
