@@ -85,6 +85,7 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (parts[0] === 'driver' && parts[1] === 'applications' && parts.length === 3) return getDriverApplication(parts[2]);
   if (parts[0] === 'driver' && parts[1] === 'applications' && parts[3] === 'submit') return submitDriverApplication(parts[2], body);
   if (r === 'driver/login') return driverLogin(body);
+  if (r === 'driver/logout') return driverLogout(body, driverId, driverToken);
   if (r === 'driver/me') return getDriverMe(requireDriver(driverId, driverToken).id);
   if (r === 'driver/jobs') return getDriverJobs(requireDriver(driverId, driverToken).id);
   if (r === 'driver/availability') return setDriverAvailability(body, requireDriver(driverId, driverToken).id);
@@ -158,6 +159,37 @@ function futureOfferRowIndex(jobId) { return findRowIndex(getFutureOffersSheet()
 function getAuditLogSheet() { return ensureSheet('Audit Log', ['id', 'actor_type', 'actor_id', 'action', 'entity_type', 'entity_id', 'metadata', 'created_at']); }
 function writeAudit(actorType, actorId, action, entityType, entityId, metadata) {
   getAuditLogSheet().appendRow([Utilities.getUuid(), actorType, actorId || '', action, entityType, entityId || '', JSON.stringify(metadata || {}), new Date().toISOString()]);
+}
+
+function getDriverTokensSheet() { return ensureSheet('DriverTokens', ['driverId', 'token', 'created_at']); }
+function setDriverToken(driverId, token) {
+  const sheet = getDriverTokensSheet();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = rows.length - 1; i >= 1; i--) {
+    if (rows[i][0] === driverId || rows[i][1] === token) sheet.deleteRow(i + 1);
+  }
+  sheet.appendRow([driverId, token, new Date().toISOString()]);
+}
+function getDriverIdByToken(token) {
+  if (!token) return null;
+  const rows = getDriverTokensSheet().getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) if (rows[i][1] === token) return String(rows[i][0]);
+  return null;
+}
+function getDriverToken(driverId) {
+  const rows = getDriverTokensSheet().getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) if (rows[i][0] === driverId) return String(rows[i][1]);
+  return null;
+}
+function revokeDriverToken(driverId) {
+  const sheet = getDriverTokensSheet();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = rows.length - 1; i >= 1; i--) if (rows[i][0] === driverId) sheet.deleteRow(i + 1);
+}
+function revokeDriverTokenByToken(token) {
+  const sheet = getDriverTokensSheet();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = rows.length - 1; i >= 1; i--) if (rows[i][1] === token) sheet.deleteRow(i + 1);
 }
 
 function setupSeed() {
@@ -492,12 +524,12 @@ function rejectDriverApplication(applicationId, body) {
 
 function driverSession(driverId) {
   const token = Utilities.getUuid();
-  CacheService.getScriptCache().put('driver:' + token, driverId, 21600);
+  setDriverToken(driverId, token);
   return token;
 }
 
 function requireDriver(driverId, token) {
-  const sessionDriverId = token ? CacheService.getScriptCache().get('driver:' + token) : null;
+  const sessionDriverId = token ? getDriverIdByToken(token) : null;
   if (!sessionDriverId || sessionDriverId !== driverId) throw new Error('Driver session expired. Please log in again.');
   const driver = findDriverById(driverId);
   if (!driver) throw new Error('Driver account not found');
@@ -517,6 +549,17 @@ function driverLogin(body) {
   const d = findDriverById(String(driverId || ''));
   if (!d || !driverPinMatches(d, pin)) throw new Error('Invalid driver ID or PIN');
   return { ok: true, driverId: d.id, name: d.name, token: driverSession(d.id) };
+}
+
+function driverLogout(body, driverId, token) {
+  if (driverId) {
+    revokeDriverToken(driverId);
+    updateDriver(driverId, { status: 'OFFLINE' });
+    writeAudit('driver', driverId, 'driver_logout', 'driver', driverId, {});
+  } else if (token) {
+    revokeDriverTokenByToken(token);
+  }
+  return { ok: true };
 }
 
 function driverZone(d) {

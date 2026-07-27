@@ -123,6 +123,25 @@ function DriverPageContent() {
   useEffect(() => { currentZoneIdRef.current = currentZoneId; }, [currentZoneId]);
 
   useEffect(() => {
+    const storedId = localStorage.getItem('driverId');
+    const storedToken = localStorage.getItem('driverToken');
+    if (!storedId || !storedToken) return;
+    async function restore() {
+      try {
+        await apiGet('/driver/me', { 'x-driver-id': storedId, 'x-driver-token': storedToken });
+        setDriverId(storedId);
+        setDriverName(localStorage.getItem('driverName') || '');
+        setLoggedIn(true);
+      } catch {
+        localStorage.removeItem('driverId');
+        localStorage.removeItem('driverName');
+        localStorage.removeItem('driverToken');
+      }
+    }
+    restore();
+  }, []);
+
+  useEffect(() => {
     function onErr(msg, url, line, col, err) {
       setAppError(String(msg) + (err && err.stack ? '\n' + err.stack : ''));
       return false;
@@ -194,12 +213,7 @@ function DriverPageContent() {
   }
 
   async function logout() {
-    try {
-      await api('driver/availability', { status: 'OFFLINE' }, driverAuth());
-    } catch (err) {
-      setError(err.message);
-      return;
-    }
+    try { await api('driver/logout', {}, driverAuth()); } catch {}
     localStorage.removeItem('driverId');
     localStorage.removeItem('driverName');
     localStorage.removeItem('driverToken');
@@ -869,10 +883,16 @@ function DriverPageContent() {
           <NavIcon.map /> Map
         </button>
         <button className="wj-nav-item" onClick={() => setOpenPanel('bids')}>
-          <NavIcon.bids /> Bids
+          <span style={{ position: 'relative' }}>
+            <NavIcon.bids />
+            {bidBoard.length > 0 && <span style={{ position: 'absolute', top: -6, right: -8, minWidth: 18, height: 18, padding: '0 4px', borderRadius: 999, background: 'var(--gold)', color: '#000', fontSize: '0.65rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{bidBoard.length}</span>}
+          </span> Bids
         </button>
         <button className="wj-nav-item" onClick={() => setOpenPanel('future')}>
-          <NavIcon.future /> Future
+          <span style={{ position: 'relative' }}>
+            <NavIcon.future />
+            {futureOffers.length > 0 && <span style={{ position: 'absolute', top: -6, right: -8, minWidth: 18, height: 18, padding: '0 4px', borderRadius: 999, background: 'var(--gold)', color: '#000', fontSize: '0.65rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{futureOffers.length}</span>}
+          </span> Future
         </button>
         <button className="wj-nav-item" onClick={() => setOpenPanel('menu')}>
           <NavIcon.menu /> Menu
