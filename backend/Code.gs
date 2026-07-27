@@ -599,7 +599,28 @@ function updateDriverLocation(body, driverId) {
   if (lat == null || lng == null) throw new Error('Missing coordinates');
   const d = findDriverById(driverId);
   if (!d) throw new Error('Driver not found');
-  updateDriver(driverId, { last_lat: lat, last_lng: lng, last_location_at: new Date().toISOString(), zone: getZone(lat, lng) });
+  const now = new Date().toISOString();
+  const nowMs = Date.now();
+  updateDriver(driverId, { last_lat: lat, last_lng: lng, last_location_at: now, zone: getZone(lat, lng) });
+
+  // Update distance meter for any POB job
+  getJobs().filter(job => job.driver_id === driverId && job.status === 'POB').forEach(job => {
+    let n = {};
+    try { n = JSON.parse(job.notes || '{}'); } catch (e) {}
+    const lastLat = Number(n.meterLastLat) || Number(job.pickup_lat) || 0;
+    const lastLng = Number(n.meterLastLng) || Number(job.pickup_lng) || 0;
+    const lastAt = n.meterLastAt ? new Date(n.meterLastAt).getTime() : nowMs;
+    const dist = distanceMiles(lastLat, lastLng, Number(lat), Number(lng));
+    const dtSeconds = Math.max(0, (nowMs - lastAt) / 1000);
+    const speedMph = dtSeconds > 0 ? dist / (dtSeconds / 3600) : Infinity;
+    if (speedMph < 5) n.meterWaitingSeconds = (Number(n.meterWaitingSeconds) || 0) + dtSeconds;
+    n.meterDistance = (Number(n.meterDistance) || 0) + dist;
+    n.meterLastLat = Number(lat);
+    n.meterLastLng = Number(lng);
+    n.meterLastAt = now;
+    updateJob(job.id, { notes: JSON.stringify(n), updated_at: now });
+  });
+
   Logger.log('updateDriverLocation: driver %s location updated, zone=%s', driverId, getZone(lat, lng));
   allocatePendingAsapJobs();
   return { ok: true };
@@ -626,6 +647,13 @@ function jobResponse(job) {
   const d = job.driver_id ? findDriverById(job.driver_id) : null;
   let notes = {};
   try { notes = JSON.parse(job.notes || '{}'); } catch {}
+  const meterDistance = Number(notes.meterDistance) || Number(job.miles) || 0;
+  const meterWaitingSeconds = Number(notes.meterWaitingSeconds) || 0;
+  const pobAt = job.pob_at || job.pickup_time;
+  const meterTimeOfDay = getTimeOfDay(pobAt);
+  const distanceFare = calculateFare({ miles: meterDistance, vehicleType: job.vehicle_type || 'car', timeOfDay: meterTimeOfDay });
+  const waitingFare = (meterWaitingSeconds / 60) * getWaitingRate(job.vehicle_type || 'car', pobAt);
+  const meterFare = distanceFare + waitingFare;
   return {
     jobId: job.id, status: job.status, driverId: job.driver_id || null,
     driverLat: d ? Number(d.last_lat) || null : null, driverLng: d ? Number(d.last_lng) || null : null,
@@ -640,8 +668,9 @@ function jobResponse(job) {
     paymentStatus: job.payment_status, trackingToken: job.tracking_token,
     createdAt: job.created_at, onWayAt: job.on_way_at, arrivedAt: job.arrived_at,
     pobAt: job.pob_at, completedAt: job.completed_at,
-    pobWaitingRate: Number(notes.pobWaitingRate) || 0,
-    pobMeterStartedAt: notes.pobMeterStartedAt || null
+    pobWaitingRate: Number(notes.pobWaitingRate) || getWaitingRate(job.vehicle_type || 'car', pobAt),
+    pobMeterStartedAt: notes.pobMeterStartedAt || null,
+    meterDistance, meterWaitingSeconds, meterFare
   };
 }
 
@@ -834,9 +863,17 @@ function setJobStatus(jobId, body, driverId) {
   if (status === 'ARRIVED') updates.arrived_at = now;
   if (status === 'POB') {
     updates.pob_at = now;
+    const driver = findDriverById(driverId) || {};
+    const startLat = Number(driver.last_lat) || Number(job.pickup_lat) || 0;
+    const startLng = Number(driver.last_lng) || Number(job.pickup_lng) || 0;
     const notes = (() => { try { return JSON.parse(job.notes || '{}'); } catch { return {}; } })();
     notes.pobWaitingRate = getWaitingRate(job.vehicle_type || 'car', now);
     notes.pobMeterStartedAt = now;
+    notes.meterDistance = 0;
+    notes.meterWaitingSeconds = 0;
+    notes.meterLastLat = startLat;
+    notes.meterLastLng = startLng;
+    notes.meterLastAt = now;
     updates.notes = JSON.stringify(notes);
   }
   if (status === 'COMPLETE') updates.completed_at = now;

@@ -160,9 +160,12 @@ function DriverPageContent() {
     if (!activeJob || activeJob.status !== 'POB') return null;
     const start = new Date(activeJob.pobAt || activeJob.pobMeterStartedAt || Date.now()).getTime();
     const elapsedMs = Math.max(0, now - start);
-    const elapsedMin = elapsedMs / 60000;
-    const waitingRate = Number(activeJob.pobWaitingRate) || 0;
-    return { fare: activeJob.fare + elapsedMin * waitingRate, elapsedMs, waitingRate };
+    return {
+      fare: Number(activeJob.meterFare) || activeJob.fare,
+      elapsedMs,
+      distance: Number(activeJob.meterDistance) || 0,
+      waitingSeconds: Number(activeJob.meterWaitingSeconds) || 0
+    };
   }, [activeJob, now]);
 
   const driverZone = (d) => {
@@ -825,8 +828,10 @@ function DriverPageContent() {
               <div style={{ marginBottom: '0.75rem', padding: '0.75rem', border: '1.5px solid var(--gold)', borderRadius: 12, background: 'rgba(244,191,27,0.08)' }}>
                 <div style={{ fontSize: '0.65rem', color: 'var(--gold)', fontWeight: 800, textTransform: 'uppercase' }}>Meter running</div>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.7rem', color: 'var(--cream)', lineHeight: 1 }}>{formatCurrency(liveMeter.fare)}</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--cream-dim)' }}>
-                  Max charge · {Math.floor(liveMeter.elapsedMs / 60000)}m {String(Math.floor((liveMeter.elapsedMs % 60000) / 1000)).padStart(2, '0')}s
+                <div style={{ display: 'flex', gap: 12, fontSize: '0.75rem', color: 'var(--cream-dim)', marginTop: '0.25rem' }}>
+                  <span>{Math.floor(liveMeter.elapsedMs / 60000)}m {String(Math.floor((liveMeter.elapsedMs % 60000) / 1000)).padStart(2, '0')}s</span>
+                  <span>{liveMeter.distance.toFixed(1)} mi</span>
+                  {liveMeter.waitingSeconds > 0 && <span>{Math.ceil(liveMeter.waitingSeconds / 60)}m wait</span>}
                 </div>
               </div>
             )}
