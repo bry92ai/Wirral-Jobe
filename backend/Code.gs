@@ -106,6 +106,7 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'admin/jobs') return requireAdmin(adminToken, () => ({ jobs: getAllJobs() }));
   if (r === 'admin/drivers') return requireAdmin(adminToken, () => ({ drivers: getAllDrivers() }));
   if (r === 'admin/process-future-bookings') return requireAdmin(adminToken, () => { processFutureBookings(); return { ok: true }; });
+  if (parts[0] === 'admin' && parts[1] === 'drivers' && parts[3] === 'letter') return requireAdmin(adminToken, () => { setDriverLetter(parts[2], (body || {}).letter); return { ok: true, driverId: parts[2], letter: (body || {}).letter }; });
   if (r === 'admin/assign') return requireAdmin(adminToken, () => adminAssign(body));
   if (r === 'admin/driver-applications') return requireAdmin(adminToken, () => ({ applications: getDriverApplications() }));
   if (parts[0] === 'admin' && parts[1] === 'driver-applications' && parts[3] === 'approve-badge') return requireAdmin(adminToken, () => approveDriverBadge(parts[2]));
