@@ -239,17 +239,17 @@ function DriverPageContent() {
   }
 
   async function loadBidBoard(id = driverId) {
-    try { const data = await apiGet('/driver/bid-board', { 'x-driver-id': id }); setBidBoard(data.jobs || []); }
+    try { const data = await apiGet('/driver/bid-board', driverAuth(id)); setBidBoard(data.jobs || []); }
     catch {}
   }
 
   async function loadMyBids(id = driverId) {
-    try { const data = await apiGet('/driver/my-bids', { 'x-driver-id': id }); setMyBids(data.bids || []); }
+    try { const data = await apiGet('/driver/my-bids', driverAuth(id)); setMyBids(data.bids || []); }
     catch {}
   }
 
   async function loadFutureBookings(id = driverId) {
-    try { const data = await apiGet('/driver/future-bookings', { 'x-driver-id': id }); setFutureBookings(data.jobs || []); }
+    try { const data = await apiGet('/driver/future-bookings', driverAuth(id)); setFutureBookings(data.jobs || []); }
     catch {}
   }
 
@@ -257,7 +257,7 @@ function DriverPageContent() {
     if (!amount || Number(amount) <= 0) return setError('This job does not have a valid fare.');
     setLoading(true); setError('');
     try {
-      await api(`driver/bid-board/${jobId}/bid`, { amount: Number(amount) }, { 'x-driver-id': driverId });
+      await api(`driver/bid-board/${jobId}/bid`, { amount: Number(amount) }, driverAuth());
       await Promise.all([loadBidBoard(), loadMyBids()]);
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
