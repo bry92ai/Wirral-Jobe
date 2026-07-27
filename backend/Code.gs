@@ -339,7 +339,7 @@ function isDriverLocationFresh(driver) {
 }
 function getAvailableDrivers() {
   return getDrivers().filter(d => d.status === 'AVAILABLE').map(d => ({
-    id: d.id, name: d.name, vehicle_type: d.vehicle_type, zone: d.zone, available_since: d.available_since || null,
+    id: d.id, name: d.name, vehicle_type: d.vehicle_type, zone: driverZone(d), available_since: d.available_since || null,
     last_lat: Number(d.last_lat) || null, last_lng: Number(d.last_lng) || null, status: d.status
   }));
 }
@@ -509,6 +509,13 @@ function driverLogin(body) {
   return { ok: true, driverId: d.id, name: d.name, token: driverSession(d.id) };
 }
 
+function driverZone(d) {
+  const lat = Number(d.last_lat);
+  const lng = Number(d.last_lng);
+  if (lat && lng) return getZone(lat, lng) || d.zone || null;
+  return d.zone || null;
+}
+
 function getDriverMe(driverId) {
   if (!driverId) throw new Error('No driver ID');
   const d = findDriverById(driverId);
@@ -516,7 +523,7 @@ function getDriverMe(driverId) {
   return {
     id: d.id, name: d.name, vehicleType: d.vehicle_type, status: d.status,
     settleBalance: Number(d.settle_balance) || 0, commissionRate: Number(d.commission_rate) || 0,
-    zone: d.zone, lastLat: Number(d.last_lat) || null, lastLng: Number(d.last_lng) || null,
+    zone: driverZone(d), lastLat: Number(d.last_lat) || null, lastLng: Number(d.last_lng) || null,
     lastLocationAt: d.last_location_at || null, availableSince: d.available_since || null
   };
 }

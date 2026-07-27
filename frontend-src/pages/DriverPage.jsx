@@ -135,12 +135,23 @@ function DriverPageContent() {
 
   const activeJob = useMemo(() => (jobs || []).find(j => !['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(j.status)), [jobs]);
 
+  const driverZone = (d) => {
+    if (d?.zone) return d.zone;
+    const lat = Number(d?.lastLat);
+    const lng = Number(d?.lastLng);
+    if (lat && lng) {
+      const f = findZone(lat, lng);
+      return f ? f.properties.zoneId : null;
+    }
+    return null;
+  };
+
   const queueInfo = useMemo(() => {
     const zoneId = currentZoneId || profile?.zone || null;
     const zoneName = zoneId ? getZoneName(zoneId) : 'Outside Wirral';
     const queue = [profile, ...otherDrivers]
       .filter(Boolean)
-      .filter(d => d.status === 'AVAILABLE' && d.zone && d.zone === zoneId)
+      .filter(d => d.status === 'AVAILABLE' && driverZone(d) === zoneId)
       .sort((a, b) => String(a.availableSince || '9999').localeCompare(String(b.availableSince || '9999')));
     const position = queue.findIndex(d => d.id === driverId);
     return { zoneId, zoneName, queue, position: position >= 0 ? position + 1 : null };
@@ -151,7 +162,7 @@ function DriverPageContent() {
     const zoneName = getZoneName(selectedZoneId);
     const queue = [profile, ...otherDrivers]
       .filter(Boolean)
-      .filter(d => d.status === 'AVAILABLE' && d.zone && d.zone === selectedZoneId)
+      .filter(d => d.status === 'AVAILABLE' && driverZone(d) === selectedZoneId)
       .sort((a, b) => String(a.availableSince || '9999').localeCompare(String(b.availableSince || '9999')));
     const inZone = (job) => {
       const z = findZone(job.pickupLat, job.pickupLng);
