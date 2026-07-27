@@ -828,10 +828,16 @@ function startOffer(jobId, pickupLat, pickupLng) {
     return;
   }
   Logger.log('startOffer: offering job %s to driver %s', jobId, driver.id);
-  const offered = JSON.stringify([driver.id]);
+  startOfferToDriver(jobId, pickupLat, pickupLng, driver.id);
+}
+
+function startOfferToDriver(jobId, pickupLat, pickupLng, driverId) {
+  if (offerRowIndex(jobId) >= 0) return;
+  const offered = JSON.stringify([driverId]);
   const expiresAt = Date.now() + 60000;
-  getOffersSheet().appendRow([jobId, driver.id, offered, expiresAt, pickupLat, pickupLng]);
+  getOffersSheet().appendRow([jobId, driverId, offered, expiresAt, pickupLat, pickupLng]);
   SpreadsheetApp.flush();
+  Logger.log('startOfferToDriver: offering job %s to driver %s', jobId, driverId);
 }
 
 function offerRowIndex(jobId) {
@@ -945,12 +951,12 @@ function placeBid(jobId, body, driverId) {
   const driver = findDriverById(driverId);
   if (!driver) throw new Error('Driver not found');
   if (job.status !== 'BIDDING') throw new Error('Job is no longer open for bids');
+  if (offerRowIndex(jobId) >= 0) throw new Error('This job is already being offered to another driver');
   const now = new Date().toISOString();
-  updateJob(jobId, { status: 'ASSIGNED', driver_id: driverId, commission_rate: Number(driver.commission_rate) || 0, updated_at: now });
-  updateDriver(driverId, { status: 'BUSY' });
-  getBidsSheet().appendRow([now, jobId, driverId, amount, 'accepted']);
-  writeAudit('driver', driverId, 'bid_accepted', 'job', jobId, { amount });
-  return { ok: true, status: 'ASSIGNED', driverId, fare: Number(job.fare) || 0 };
+  getBidsSheet().appendRow([now, jobId, driverId, amount, 'pending']);
+  startOfferToDriver(jobId, Number(job.pickup_lat), Number(job.pickup_lng), driverId);
+  writeAudit('driver', driverId, 'bid_placed', 'job', jobId, { amount });
+  return { ok: true, status: 'OFFERED', driverId, fare: Number(job.fare) || 0 };
 }
 
 // ---------- Allocation ----------
