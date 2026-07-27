@@ -8,21 +8,13 @@ import logo from '../assets/logo.jpg';
 
 function playOfferSound() {
   try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
-    if (ctx.state === 'suspended') ctx.resume();
-    const oscillator = ctx.createOscillator();
-    const gain = ctx.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(880, ctx.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
-    gain.gain.setValueAtTime(0.12, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-    oscillator.connect(gain);
-    gain.connect(ctx.destination);
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.3);
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance('job offer');
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    window.speechSynthesis.speak(utterance);
   } catch {}
 }
 
@@ -41,7 +33,9 @@ const STATUS_LABELS = {
   ON_WAY: 'On the way',
   ARRIVED: 'Arrived',
   POB: 'Passenger on board',
-  COMPLETE: 'Complete'
+  COMPLETE: 'Complete',
+  NO_SHOW: 'No show',
+  CUSTOMER_CANCELLED: 'Customer cancelled'
 };
 const STATUS_ACTIONS = {
   ASSIGNED: { next: 'ON_WAY', label: 'On the way to pickup' },
@@ -137,7 +131,7 @@ function DriverPageContent() {
     return () => { window.onerror = null; window.onunhandledrejection = null; };
   }, []);
 
-  const activeJob = useMemo(() => (jobs || []).find(j => !['COMPLETE', 'CANCELLED'].includes(j.status)), [jobs]);
+  const activeJob = useMemo(() => (jobs || []).find(j => !['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(j.status)), [jobs]);
 
   const queueInfo = useMemo(() => {
     const zoneId = currentZoneId || profile?.zone || null;
@@ -326,6 +320,15 @@ function DriverPageContent() {
     setLoading(true);
     try { await api(`driver/jobs/${jobId}/status`, { status }, driverAuth()); await loadJobs(); await loadProfile(); }
     catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  async function changeVehicle(jobId, vehicleType) {
+    setLoading(true);
+    try {
+      await api(`driver/jobs/${jobId}/vehicle`, { vehicleType }, driverAuth());
+      await loadJobs();
+    } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   }
 
@@ -760,6 +763,14 @@ function DriverPageContent() {
                 {loading ? 'Updating…' : STATUS_ACTIONS[activeJob.status].label}
               </button>
             )}
+            <div style={{ display: 'flex', gap: 8, marginTop: '0.75rem' }}>
+              <button onClick={() => changeVehicle(activeJob.jobId, 'car')} disabled={loading || activeJob.vehicleType === 'car'} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Car tariff</button>
+              <button onClick={() => changeVehicle(activeJob.jobId, 'mpv')} disabled={loading || activeJob.vehicleType === 'mpv'} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>MPV tariff</button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: '0.5rem' }}>
+              <button onClick={() => setStatus(activeJob.jobId, 'NO_SHOW')} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>No show</button>
+              <button onClick={() => setStatus(activeJob.jobId, 'CUSTOMER_CANCELLED')} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>Customer cancelled</button>
+            </div>
           </div>
         </div>
       )}

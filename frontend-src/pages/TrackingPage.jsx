@@ -24,12 +24,15 @@ export default function TrackingPage() {
 
   const label = {
     NEW: 'Finding a driver',
+    BIDDING: 'Finding a driver',
     ASSIGNED: 'Driver assigned',
     ON_WAY: 'Driver on the way',
     ARRIVED: 'Driver has arrived',
     POB: 'Journey in progress',
     COMPLETE: 'Journey complete',
-    CANCELLED: 'Booking cancelled'
+    CANCELLED: 'Booking cancelled',
+    NO_SHOW: 'Booking cancelled',
+    CUSTOMER_CANCELLED: 'Booking cancelled'
   }[job?.status] || 'Loading…';
 
   const stages = ['NEW', 'ASSIGNED', 'ON_WAY', 'ARRIVED', 'POB'];

@@ -22,6 +22,7 @@ const AIRPORTS = [
 const JOB_HEADERS = ['created_at','id','status','driver_id','customer_name','customer_phone','pickup_address','dropoff_address','pickup_lat','pickup_lng','dropoff_lat','dropoff_lng','pickup_time','vehicle_type','miles','fare','booking_fee','payment_id','payment_status','commission_rate','commission_amount','tracking_token','on_way_at','arrived_at','pob_at','completed_at','customer_id','passengers','notes','return_job_id','cancelled_at','updated_at'];
 const DRIVER_HEADERS = ['id','name','phone','pin','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','status','zone','last_lat','last_lng','last_location_at','commission_rate','settle_balance','available_since','created_at','updated_at','pin_hash'];
 const OFFER_HEADERS = ['jobId','currentDriverId','offeredDrivers','expiresAt','pickupLat','pickupLng'];
+const BID_HEADERS = ['created_at','job_id','driver_id','amount','status'];
 const CUSTOMER_HEADERS = ['id','name','phone','pin_hash','created_at'];
 const PLACE_HEADERS = ['id','customer_id','label','address','lat','lng','type','created_at'];
 const DRIVER_APPLICATION_HEADERS = ['id','status','badge_url','badge_public_id','continuation_token','name','phone','pin_hash','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','created_at','submitted_at','reviewed_at','reviewed_by','rejection_reason','driver_id'];
@@ -90,7 +91,11 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'driver/offers') return getDriverOffers(requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'offers' && parts[3] === 'accept') return acceptOffer(parts[2], requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'offers' && parts[3] === 'decline') return declineOffer(parts[2], requireDriver(driverId, driverToken).id);
+  if (r === 'driver/bid-board') return getBidBoard(requireDriver(driverId, driverToken).id);
+  if (r === 'driver/my-bids') return getMyBids(requireDriver(driverId, driverToken).id);
+  if (parts[0] === 'driver' && parts[1] === 'bid-board' && parts[3] === 'bid') return placeBid(parts[2], body, requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'jobs' && parts[3] === 'status') return setJobStatus(parts[2], body, requireDriver(driverId, driverToken).id);
+  if (parts[0] === 'driver' && parts[1] === 'jobs' && parts[3] === 'vehicle') return changeJobVehicle(parts[2], body, requireDriver(driverId, driverToken).id);
   if (r === 'driver/location') return updateDriverLocation(body, requireDriver(driverId, driverToken).id);
   if (r === 'admin/login') return adminLogin(body);
   if (r === 'admin/jobs') return requireAdmin(adminToken, () => ({ jobs: getAllJobs() }));
@@ -138,6 +143,7 @@ function ensureSheet(name, headers) {
 function getJobsSheet() { return ensureSheet('Jobs', JOB_HEADERS); }
 function getDriversSheet() { return ensureSheet('Drivers', DRIVER_HEADERS); }
 function getOffersSheet() { return ensureSheet('Offers', OFFER_HEADERS); }
+function getBidsSheet() { return ensureSheet('Bids', BID_HEADERS); }
 function getDriverApplicationsSheet() { return ensureSheet('Driver Applications', DRIVER_APPLICATION_HEADERS); }
 function getAuditLogSheet() { return ensureSheet('Audit Log', ['id', 'actor_type', 'actor_id', 'action', 'entity_type', 'entity_id', 'metadata', 'created_at']); }
 function writeAudit(actorType, actorId, action, entityType, entityId, metadata) {
@@ -718,6 +724,15 @@ function setJobStatus(jobId, body, driverId) {
   const job = findJobById(jobId);
   if (!job) throw new Error('Job not found');
   if (job.driver_id && job.driver_id !== driverId) throw new Error('Not assigned to you');
+  const cancelStatuses = ['NO_SHOW', 'CUSTOMER_CANCELLED'];
+  if (cancelStatuses.includes(status)) {
+    if (!['ASSIGNED', 'ON_WAY', 'ARRIVED', 'POB'].includes(job.status)) throw new Error('Job cannot be cancelled at this stage');
+    const now = new Date().toISOString();
+    updateJob(jobId, { status, cancelled_at: now });
+    updateDriver(driverId, { status: 'AVAILABLE', available_since: now });
+    writeAudit('driver', driverId, 'job_status_changed', 'job', jobId, { from: job.status, to: status });
+    return { ok: true, status };
+  }
   const nextStatus = { ASSIGNED: 'ON_WAY', ON_WAY: 'ARRIVED', ARRIVED: 'POB', POB: 'COMPLETE' };
   if (nextStatus[job.status] !== status) throw new Error('Job status must progress in order');
   const now = new Date().toISOString();
@@ -743,9 +758,33 @@ function setJobStatus(jobId, body, driverId) {
   return { ok: true, status };
 }
 
+function changeJobVehicle(jobId, body, driverId) {
+  if (!driverId) throw new Error('No driver ID');
+  const { vehicleType } = body || {};
+  if (vehicleType !== 'car' && vehicleType !== 'mpv') throw new Error('Invalid vehicle type');
+  const job = findJobById(jobId);
+  if (!job) throw new Error('Job not found');
+  if (job.driver_id !== driverId) throw new Error('Not assigned to you');
+  if (['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(job.status)) throw new Error('Job is already finished');
+  const pickupLat = Number(job.pickup_lat);
+  const pickupLng = Number(job.pickup_lng);
+  const dropoffLat = Number(job.dropoff_lat);
+  const dropoffLng = Number(job.dropoff_lng);
+  let fare = calculateAirportFare({ pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType });
+  if (fare == null) {
+    const timeOfDay = getTimeOfDay(job.pickup_time) || getTimeOfDay(job.created_at);
+    fare = calculateFare({ miles: Number(job.miles) || 0, vehicleType, timeOfDay });
+  }
+  const now = new Date().toISOString();
+  updateJob(jobId, { vehicle_type: vehicleType, fare: fare.toFixed(2), updated_at: now });
+  writeAudit('driver', driverId, 'job_vehicle_changed', 'job', jobId, { vehicleType, fare });
+  return { ok: true, fare, vehicleType };
+}
+
 // ---------- Offers ----------
 
 function getOffers() { return rowsToObjects(getOffersSheet(), OFFER_HEADERS); }
+function getBids() { return rowsToObjects(getBidsSheet(), BID_HEADERS); }
 
 function startOffer(jobId, pickupLat, pickupLng) {
   Logger.log('startOffer: jobId=%s lat=%s lng=%s', jobId, pickupLat, pickupLng);
@@ -832,12 +871,52 @@ function declineOffer(jobId, driverId) {
   const next = findNextQueuedDriver(Number(row[4]), Number(row[5]), offered);
   if (!next) {
     sheet.deleteRow(idx);
+    updateJob(jobId, { status: 'BIDDING', updated_at: new Date().toISOString() });
+    writeAudit('system', '', 'offer_exhausted', 'job', jobId, { status: 'BIDDING' });
   } else {
     offered.push(next.id);
     sheet.getRange(idx, 2, 1, 3).setValues([[next.id, JSON.stringify(offered), Date.now() + 60000]]);
   }
   SpreadsheetApp.flush();
   return { ok: true };
+}
+
+// ---------- Bids ----------
+
+function getBidBoard(driverId) {
+  const jobs = getJobs().filter(j => j.status === 'BIDDING');
+  const bids = getBids();
+  return { jobs: jobs.map(job => {
+    const resp = jobResponse(job);
+    resp.myBid = bids.find(b => b.job_id === job.id && b.driver_id === driverId) || null;
+    return resp;
+  }) };
+}
+
+function getMyBids(driverId) {
+  const jobs = getJobs();
+  const bids = getBids().filter(b => b.driver_id === driverId).map(b => {
+    const job = jobs.find(j => j.id === b.job_id);
+    return { ...b, job: job ? jobResponse(job) : null };
+  });
+  return { bids };
+}
+
+function placeBid(jobId, body, driverId) {
+  if (!driverId) throw new Error('No driver ID');
+  const amount = Number((body || {}).amount);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Invalid bid amount');
+  const job = findJobById(jobId);
+  if (!job) throw new Error('Job not found');
+  const driver = findDriverById(driverId);
+  if (!driver) throw new Error('Driver not found');
+  if (job.status !== 'BIDDING') throw new Error('Job is no longer open for bids');
+  const now = new Date().toISOString();
+  updateJob(jobId, { status: 'ASSIGNED', driver_id: driverId, commission_rate: Number(driver.commission_rate) || 0, updated_at: now });
+  updateDriver(driverId, { status: 'BUSY' });
+  getBidsSheet().appendRow([now, jobId, driverId, amount, 'accepted']);
+  writeAudit('driver', driverId, 'bid_accepted', 'job', jobId, { amount });
+  return { ok: true, status: 'ASSIGNED', driverId, fare: Number(job.fare) || 0 };
 }
 
 // ---------- Allocation ----------
@@ -953,6 +1032,14 @@ function calculateFare({ miles, vehicleType, timeOfDay }) {
   const rates = (TARIFF[vehicleType] && TARIFF[vehicleType][timeOfDay]) ? TARIFF[vehicleType][timeOfDay] : TARIFF.car.day;
   if (m <= 1) return rates.firstMile;
   return rates.firstMile + rates.perMile * (m - 1);
+}
+
+function getTimeOfDay(date) {
+  const d = date ? new Date(date) : new Date();
+  if (isNaN(d.getTime())) return 'day';
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  if (minutes >= 21 * 60 || minutes < 5 * 60 + 30) return 'night';
+  return 'day';
 }
 
 function shortUuid() {
