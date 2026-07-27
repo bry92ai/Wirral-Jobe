@@ -775,7 +775,8 @@ function createBooking(body) {
 
   const pickupTime = new Date(p.pickupTime || new Date().toISOString());
   if (Number.isNaN(pickupTime.getTime()) || pickupTime.getTime() < Date.now() - 60000) throw new Error('Please choose a valid pickup time');
-  const isFutureBooking = pickupTime.getTime() > Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
+  const isAirport = airportFare != null;
+  const isFutureBooking = isAirport || pickupTime.getTime() > Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
   const paymentRequired = squarePaymentsEnabled();
   Logger.log('createBooking: jobId=%s isFuture=%s paymentRequired=%s', jobId, isFutureBooking, paymentRequired);
   if (!isFutureBooking && !paymentRequired) {
