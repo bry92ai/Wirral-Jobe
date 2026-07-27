@@ -57,3 +57,11 @@ export function headingIcon(L, color, heading, size = 36, className = '') {
 
 export const pickupIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 24"><path fill="#22c55e" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
 export const dropoffIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 24"><path fill="#ef4444" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
+
+export function coinIconHtml(size = 32) {
+  return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:linear-gradient(135deg,#ffd700,#d4af37);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;color:#3a2e08;font-weight:900;font-size:${Math.round(size * 0.55)}px;line-height:1">£</div>`;
+}
+
+export function coinIcon(L, size = 32, className = '') {
+  return divIcon(L, coinIconHtml(size), `coin-marker ${className}`, size);
+}

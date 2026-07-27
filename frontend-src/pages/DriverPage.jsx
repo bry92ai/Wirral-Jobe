@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, apiGet } from '../lib/api.js';
 import { FLIGHTPATH_ZONES, findZone, getZoneName } from '../lib/zones.js';
 import { distanceMiles } from '../lib/geo.js';
-import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg } from '../lib/leaflet.js';
+import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg, coinIcon } from '../lib/leaflet.js';
 import logo from '../assets/logo.jpg';
 
 function playOfferSound() {
@@ -95,6 +95,7 @@ function DriverPageContent() {
   const [heading, setHeading] = useState(null);
   const [openPanel, setOpenPanel] = useState(null);
   const [bidBoard, setBidBoard] = useState([]);
+  const [selectedBid, setSelectedBid] = useState(null);
   const [myBids, setMyBids] = useState([]);
   const [futureBookings, setFutureBookings] = useState([]);
   const [futureTab, setFutureTab] = useState('upcoming');
@@ -109,6 +110,7 @@ function DriverPageContent() {
   const offerMarkersRef = useRef([]);
   const otherDriverMarkersRef = useRef([]);
   const jobMarkersRef = useRef([]);
+  const bidMarkersRef = useRef([]);
   const geoJsonLayerRef = useRef(null);
   const zoneLabelsRef = useRef([]);
   const pendingZoneRef = useRef(null);
@@ -446,6 +448,21 @@ function DriverPageContent() {
     if (!mapReady || !LRef.current) return;
     const L = LRef.current;
     const map = mapObjRef.current;
+    bidMarkersRef.current.forEach(m => map.removeLayer(m));
+    bidMarkersRef.current = [];
+    bidBoard.forEach(job => {
+      if (job.myBid) return;
+      const marker = L.marker([job.pickupLat, job.pickupLng], { icon: coinIcon(L) }).addTo(map)
+        .bindPopup(`Bid: ${job.pickupAddress}<br/>${formatCurrency(job.fare)}`);
+      marker.on('click', () => { setSelectedBid(job); });
+      bidMarkersRef.current.push(marker);
+    });
+  }, [mapReady, bidBoard]);
+
+  useEffect(() => {
+    if (!mapReady || !LRef.current) return;
+    const L = LRef.current;
+    const map = mapObjRef.current;
     otherDriverMarkersRef.current.forEach(m => map.removeLayer(m));
     otherDriverMarkersRef.current = otherDrivers
       .filter(d => d.id !== driverId && d.lastLat != null && d.lastLng != null)
@@ -469,6 +486,11 @@ function DriverPageContent() {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [loggedIn]);
+
+  useEffect(() => {
+    if (!selectedBid) return;
+    if (!bidBoard.find(j => j.jobId === selectedBid.jobId)) setSelectedBid(null);
+  }, [bidBoard, selectedBid]);
 
   const previousOfferCountRef = useRef(0);
   useEffect(() => {
@@ -771,6 +793,35 @@ function DriverPageContent() {
               <button onClick={() => setStatus(activeJob.jobId, 'NO_SHOW')} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>No show</button>
               <button onClick={() => setStatus(activeJob.jobId, 'CUSTOMER_CANCELLED')} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>Customer cancelled</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {!activeJob && selectedBid && (
+        <div style={{ position: 'absolute', bottom: 72, left: 12, right: 12, zIndex: 1001, maxHeight: '45vh', overflowY: 'auto' }}>
+          <div className="card" style={{ padding: '1rem', borderRadius: 18, border: '2px solid var(--gold)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <span style={{ color: 'var(--gold)', fontWeight: 800, fontSize: '0.9rem' }}>Open job bid</span>
+              <button onClick={() => setSelectedBid(null)} className="btn btn-outline btn-sm">Close</button>
+            </div>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: '0.35rem' }}>
+                <span className="wj-dot wj-dot-green" style={{ marginTop: 4 }} />
+                <div style={{ fontSize: '0.85rem' }}><span style={{ color: 'var(--gold)', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>Pickup</span><br />{selectedBid.pickupAddress}</div>
+              </div>
+              <div style={{ width: 2, height: 14, background: 'var(--border)', marginLeft: 3 }} />
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: '0.25rem' }}>
+                <span className="wj-dot wj-dot-red" style={{ marginTop: 4 }} />
+                <div style={{ fontSize: '0.85rem' }}><span style={{ color: 'var(--gold)', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>Drop-off</span><br />{selectedBid.dropoffAddress}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--cream-dim)' }}>Fare</span>
+              <span style={{ fontWeight: 800, fontSize: '1.2rem' }}>{formatCurrency(selectedBid.fare)}</span>
+            </div>
+            <button onClick={() => placeBid(selectedBid.jobId, selectedBid.fare)} disabled={loading} className="btn btn-primary">
+              {loading ? 'Asking…' : 'Ask for this job'}
+            </button>
           </div>
         </div>
       )}
