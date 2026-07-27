@@ -99,6 +99,7 @@ function DriverPageContent() {
   const [bidTab, setBidTab] = useState('open');
   const [myBids, setMyBids] = useState([]);
   const [futureBookings, setFutureBookings] = useState([]);
+  const [futureOffers, setFutureOffers] = useState([]);
   const [futureTab, setFutureTab] = useState('upcoming');
   const [followMe, setFollowMe] = useState(true);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
@@ -265,6 +266,11 @@ function DriverPageContent() {
     catch {}
   }
 
+  async function loadFutureOffers(id = driverId) {
+    try { const data = await apiGet('/driver/future-offers', driverAuth(id)); setFutureOffers(data.offers || []); }
+    catch {}
+  }
+
   async function placeBid(jobId, amount) {
     if (!amount || Number(amount) <= 0) return setError('This job does not have a valid fare.');
     setLoading(true); setError('');
@@ -280,6 +286,24 @@ function DriverPageContent() {
     try {
       await api(`driver/future-bookings/${jobId}/accept`, {}, driverAuth());
       await Promise.all([loadFutureBookings(), loadJobs()]);
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  async function acceptFutureOffer(jobId) {
+    setLoading(true); setError('');
+    try {
+      await api(`driver/future-offers/${jobId}/accept`, {}, driverAuth());
+      await Promise.all([loadFutureOffers(), loadFutureBookings(), loadJobs()]);
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  async function declineFutureOffer(jobId) {
+    setLoading(true); setError('');
+    try {
+      await api(`driver/future-offers/${jobId}/decline`, {}, driverAuth());
+      await loadFutureOffers();
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   }
@@ -489,7 +513,7 @@ function DriverPageContent() {
   useEffect(() => {
     if (!loggedIn) return;
     loadJobs(); loadOffers(); loadProfile(); loadOtherDrivers();
-    const id = setInterval(() => { loadJobs(); loadOffers(); loadProfile(); loadOtherDrivers(); loadBidBoard(); loadMyBids(); loadFutureBookings(); }, 5000);
+    const id = setInterval(() => { loadJobs(); loadOffers(); loadProfile(); loadOtherDrivers(); loadBidBoard(); loadMyBids(); loadFutureBookings(); loadFutureOffers(); }, 5000);
     return () => clearInterval(id);
   }, [loggedIn, driverId]);
 
@@ -938,6 +962,50 @@ function DriverPageContent() {
               {openPanel === 'future' && (
                 <div className="wj-future-screen">
                   <div className="wj-future-hero"><img src={logo} alt="The Wirral Jobe" /><div><h3>Future bookings</h3><p>Jobs booked in advance. Allocation will start closer to the pickup time.</p></div></div>
+
+                  {futureOffers.length > 0 && (
+                    <div style={{ marginBottom: '0.9rem' }}>
+                      {futureOffers.map(offer => {
+                        const secondsLeft = Math.max(0, Math.ceil((offer.expiresAt - now) / 1000));
+                        const pickupDate = new Date(offer.pickupTime);
+                        const pickupZone = findZone(offer.pickupLat, offer.pickupLng);
+                        const dropoffZone = findZone(offer.dropoffLat, offer.dropoffLng);
+                        const runningMiles = myLocation ? distanceMiles(myLocation.lat, myLocation.lng, offer.pickupLat, offer.pickupLng) : null;
+                        return (
+                          <div key={offer.jobId} className="card" style={{ border: '2px solid var(--gold)', borderRadius: 18, padding: '1rem', background: 'linear-gradient(135deg, #15130b, #090909)', marginBottom: '0.75rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                              <span style={{ fontWeight: 800, textTransform: 'uppercase', color: 'var(--gold)' }}>Future offer · Grade {offer.letter || '—'}</span>
+                              <span style={{ fontSize: '0.75rem', fontWeight: 800, color: secondsLeft < 15 ? '#ff9d9d' : 'var(--gold)' }}>{secondsLeft}s left</span>
+                            </div>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--cream)', marginBottom: '0.4rem' }}>{offer.pickupAddress} → {offer.dropoffAddress}</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: '0.75rem' }}>
+                              <div style={{ padding: '0.5rem', border: '1.5px solid var(--border-strong)', borderRadius: 10, background: 'rgba(0,0,0,0.25)' }}>
+                                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Fare</div>
+                                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', color: 'var(--gold)' }}>{formatCurrency(offer.fare)}</div>
+                              </div>
+                              <div style={{ padding: '0.5rem', border: '1.5px solid var(--border-strong)', borderRadius: 10, background: 'rgba(0,0,0,0.25)' }}>
+                                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Pickup</div>
+                                <div style={{ fontSize: '0.85rem', color: 'var(--cream)' }}>{pickupDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+                              </div>
+                              <div style={{ padding: '0.5rem', border: '1.5px solid var(--border-strong)', borderRadius: 10, background: 'rgba(0,0,0,0.25)' }}>
+                                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Running</div>
+                                <div style={{ fontSize: '0.85rem', color: 'var(--cream)' }}>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</div>
+                              </div>
+                              <div style={{ padding: '0.5rem', border: '1.5px solid var(--border-strong)', borderRadius: 10, background: 'rgba(0,0,0,0.25)' }}>
+                                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Vehicle</div>
+                                <div style={{ fontSize: '0.85rem', color: 'var(--cream)' }}>{offer.vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</div>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                              <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => acceptFutureOffer(offer.jobId)} disabled={loading}>Accept</button>
+                              <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => declineFutureOffer(offer.jobId)} disabled={loading}>Decline</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   <div className="wj-future-tabs">
                     <button className={futureTab === 'upcoming' ? 'active' : ''} onClick={() => setFutureTab('upcoming')}>Upcoming</button>
                     <button className={futureTab === 'offered' ? 'active' : ''} onClick={() => setFutureTab('offered')}>Offered to me</button>
