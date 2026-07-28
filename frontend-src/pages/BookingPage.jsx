@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, apiGet } from '../lib/api.js';
 import { calculateFare, calculateAirportFare, getTimeOfDay } from '../lib/fare.js';
 import { distanceMiles } from '../lib/geo.js';
@@ -202,6 +203,7 @@ function toIsoLocal(date) {
 }
 
 export default function BookingPage() {
+  const navigate = useNavigate();
   const [screen, setScreenState] = useState('home');
   const [isFuture, setIsFuture] = useState(false);
 
@@ -302,14 +304,14 @@ export default function BookingPage() {
   const mpvFare = oneWayMpvFare * tripCount;
 
   useEffect(() => {
-    if (!customerToken) return;
+    if (!customerToken) { navigate('/customer', { replace: true }); return; }
     Promise.all([api('customer/me', { customerToken }), api('customer/places', { customerToken })])
       .then(([me, places]) => { setCustomerName(me.customer.name); setCustomerPhone(me.customer.phone); setSavedPlaces(places.places || []); })
       .catch(() => {
         localStorage.removeItem('wirralCustomerToken');
         setCustomerToken('');
       });
-  }, [customerToken]);
+  }, [customerToken, navigate]);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
@@ -502,17 +504,8 @@ export default function BookingPage() {
         customerPhone: formatPhone(customerPhone),
         passengers
       };
-      if (customerToken) booking.customerToken = customerToken;
-      let outbound;
-      try {
-        outbound = await api('booking', booking);
-      } catch (err) {
-        if (!customerToken || err.message !== 'Customer session expired. Please log in again.') throw err;
-        localStorage.removeItem('wirralCustomerToken');
-        setCustomerToken('');
-        delete booking.customerToken;
-        outbound = await api('booking', booking);
-      }
+      booking.customerToken = customerToken;
+      const outbound = await api('booking', booking);
       if (outbound.error) throw new Error(outbound.error);
       setResult(outbound);
       setClientSecret(outbound.clientSecret || null);
@@ -546,7 +539,9 @@ export default function BookingPage() {
       timeOfDay: getTimeOfDay(returnDate),
       pickupTime: returnDate.toISOString(),
       customerName: customerName.trim(),
-      customerPhone: formatPhone(customerPhone)
+      customerPhone: formatPhone(customerPhone),
+      passengers,
+      customerToken
     });
     if (returnData.error) throw new Error(returnData.error);
     setReturnResult(returnData);

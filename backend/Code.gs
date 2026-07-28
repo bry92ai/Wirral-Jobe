@@ -45,7 +45,7 @@ const JOB_HEADERS = ['created_at','id','status','driver_id','customer_name','cus
 const DRIVER_HEADERS = ['id','name','phone','pin','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','status','zone','last_lat','last_lng','last_location_at','commission_rate','settle_balance','available_since','created_at','updated_at','pin_hash'];
 const OFFER_HEADERS = ['jobId','currentDriverId','offeredDrivers','expiresAt','pickupLat','pickupLng'];
 const BID_HEADERS = ['created_at','job_id','driver_id','amount','status'];
-const CUSTOMER_HEADERS = ['id','name','phone','pin_hash','created_at'];
+const CUSTOMER_HEADERS = ['id','name','phone','email','pin_hash','created_at'];
 const PLACE_HEADERS = ['id','customer_id','label','address','lat','lng','type','created_at'];
 const DRIVER_APPLICATION_HEADERS = ['id','status','badge_url','badge_public_id','continuation_token','name','phone','pin_hash','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','created_at','submitted_at','reviewed_at','reviewed_by','rejection_reason','driver_id'];
 
@@ -94,8 +94,10 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'booking') return createBooking(body);
   if (r === 'booking/confirm') return confirmBooking(body);
   if (r === 'tracking' && parts.length >= 2) return getTracking(parts[1]);
+  if (r === 'customer/request-otp') return customerRequestOtp(body);
   if (r === 'customer/register') return customerRegister(body);
   if (r === 'customer/login') return customerLogin(body);
+  if (r === 'customer/logout') return customerLogout(body);
   if (r === 'customer/forgot-pin') return customerForgotPin(body);
   if (r === 'customer/me') return getCustomerMe(body.customerToken);
   if (r === 'customer/jobs') return getCustomerJobs(body.customerToken);
@@ -221,6 +223,47 @@ function revokeDriverTokenByToken(token) {
   for (let i = rows.length - 1; i >= 1; i--) if (rows[i][1] === token) sheet.deleteRow(i + 1);
 }
 
+function getCustomerTokensSheet() { return ensureSheet('CustomerTokens', ['customerId', 'token', 'created_at']); }
+function setCustomerToken(customerId, token) {
+  const sheet = getCustomerTokensSheet();
+  sheet.appendRow([customerId, token, new Date().toISOString()]);
+}
+function getCustomerIdByToken(token) {
+  if (!token) return null;
+  const rows = getCustomerTokensSheet().getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) if (rows[i][1] === token) return String(rows[i][0]);
+  return null;
+}
+function revokeCustomerToken(token) {
+  const sheet = getCustomerTokensSheet();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = rows.length - 1; i >= 1; i--) if (rows[i][1] === token) sheet.deleteRow(i + 1);
+}
+function getCustomerOtpsSheet() { return ensureSheet('CustomerOTPs', ['phone', 'otp', 'name', 'email', 'verified', 'expiresAt', 'created_at']); }
+function cleanupCustomerOtps(phone) {
+  const sheet = getCustomerOtpsSheet();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = rows.length - 1; i >= 1; i--) if (rows[i][0] === phone) sheet.deleteRow(i + 1);
+}
+function createCustomerOtp(phone, name, email) {
+  cleanupCustomerOtps(phone);
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  const expiresAt = Date.now() + 10 * 60000;
+  getCustomerOtpsSheet().appendRow([phone, otp, name, email || '', 'false', expiresAt, new Date().toISOString()]);
+  return { otp, expiresAt };
+}
+function verifyCustomerOtp(phone, otp) {
+  const sheet = getCustomerOtpsSheet();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === phone && String(rows[i][1]) === otp) {
+      if (Date.now() > Number(rows[i][5])) throw new Error('OTP has expired');
+      return { name: rows[i][2], email: rows[i][3] };
+    }
+  }
+  throw new Error('Invalid OTP');
+}
+
 function setupSeed() {
   ensureDrivers();
   return { ok: true, drivers: getDrivers().map(d => ({ id: d.id, name: d.name, status: d.status })) };
@@ -280,11 +323,11 @@ function getCustomers() { return rowsToObjects(getCustomersSheet(), CUSTOMER_HEA
 function findCustomerByPhone(phone) { return getCustomers().find(c => c.phone === normalizePhone(phone)); }
 function customerSession(customerId) {
   const token = Utilities.getUuid();
-  CacheService.getScriptCache().put('customer:' + token, customerId, 21600);
+  setCustomerToken(customerId, token);
   return token;
 }
 function requireCustomer(token) {
-  const id = token ? CacheService.getScriptCache().get('customer:' + token) : null;
+  const id = getCustomerIdByToken(token);
   if (!id) throw new Error('Customer session expired. Please log in again.');
   const customer = getCustomers().find(c => c.id === id);
   if (!customer) throw new Error('Customer account not found');
@@ -306,7 +349,7 @@ function sendTwilioSms(to, body) {
   });
   if (response.getResponseCode() >= 300) throw new Error('Unable to send SMS');
 }
-function customerResponse(customer) { return { id: customer.id, name: customer.name, phone: customer.phone }; }
+function customerResponse(customer) { return { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email || '' }; }
 function customerSmsEnabled() { return PropertiesService.getScriptProperties().getProperty('SMS_ENABLED') === 'true'; }
 function squarePaymentsEnabled() {
   const properties = PropertiesService.getScriptProperties();
@@ -348,33 +391,50 @@ function createSquarePayment(job, sourceId) {
   if (data.payment.status !== 'COMPLETED') throw new Error('Square payment status: ' + data.payment.status);
   return data.payment;
 }
+function customerRequestOtp(body) {
+  const name = String(body.name || '').trim();
+  const phone = normalizePhone(body.phone);
+  const email = String(body.email || '').trim();
+  if (!name || !phone || phone.length < 10) throw new Error('Please enter your name and mobile number');
+  const result = createCustomerOtp(phone, name, email);
+  return { ok: true, otp: result.otp, expiresAt: result.expiresAt, note: 'In development the OTP is returned here. SMS will be used when messaging is enabled.' };
+}
 function customerRegister(body) {
   const name = String(body.name || '').trim();
   const phone = normalizePhone(body.phone);
-  const smsEnabled = customerSmsEnabled();
-  const pin = smsEnabled ? newPin() : String(body.pin || '');
+  const email = String(body.email || '').trim();
+  const pin = String(body.pin || '');
   if (!name || !phone || phone.length < 10) throw new Error('Please enter your name and mobile number');
   if (!/^\d{6}$/.test(pin)) throw new Error('Choose a 6-digit PIN');
+  verifyCustomerOtp(phone, String(body.otp || ''));
   if (findCustomerByPhone(phone)) throw new Error('An account already exists for this mobile number. Please log in.');
-  const customer = { id: 'CUS-' + shortUuid(), name: name, phone: phone, pin_hash: hashPin(pin), created_at: new Date().toISOString() };
+  const customer = { id: 'CUS-' + shortUuid(), name, phone, email, pin_hash: hashPin(pin), created_at: new Date().toISOString() };
   getCustomersSheet().appendRow(CUSTOMER_HEADERS.map(h => customer[h]));
-  if (smsEnabled) sendTwilioSms(phone, 'The Wirral Jobe: your customer PIN is ' + pin + '. Keep it safe; you will need it to log in.');
-  return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id), developmentPin: smsEnabled ? null : pin };
+  cleanupCustomerOtps(phone);
+  writeAudit('customer', customer.id, 'account_created', 'customer', customer.id, { phone });
+  return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
 }
 function customerLogin(body) {
   const customer = findCustomerByPhone(body.phone);
   if (!customer || customer.pin_hash !== hashPin(body.pin || '')) throw new Error('Invalid mobile number or PIN');
   return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
 }
+function customerLogout(body) {
+  revokeCustomerToken(body.customerToken);
+  return { ok: true };
+}
 function customerForgotPin(body) {
-  const customer = findCustomerByPhone(body.phone);
-  if (!customer) return { ok: true };
-  const pin = newPin();
+  const phone = normalizePhone(body.phone);
+  verifyCustomerOtp(phone, String(body.otp || ''));
+  const customer = findCustomerByPhone(phone);
+  if (!customer) throw new Error('No account found for this number');
+  const pin = String(body.pin || '');
+  if (!/^\d{6}$/.test(pin)) throw new Error('Choose a 6-digit PIN');
   const row = findRowIndex(getCustomersSheet(), row => row[0] === customer.id);
-  getCustomersSheet().getRange(row, 4).setValue(hashPin(pin));
-  const smsEnabled = customerSmsEnabled();
-  if (smsEnabled) sendTwilioSms(customer.phone, 'The Wirral Jobe: your new customer PIN is ' + pin + '. Use it to log in.');
-  return { ok: true, developmentPin: smsEnabled ? null : pin };
+  getCustomersSheet().getRange(row, 5).setValue(hashPin(pin));
+  cleanupCustomerOtps(phone);
+  writeAudit('customer', customer.id, 'pin_reset', 'customer', customer.id, {});
+  return { ok: true, customerToken: customerSession(customer.id) };
 }
 function getCustomerMe(token) { return { customer: customerResponse(requireCustomer(token)) }; }
 function getCustomerJobs(token) {
@@ -790,9 +850,10 @@ function allocatePendingAsapJobs() {
 
 function createBooking(body) {
   const p = body || {};
-  const customer = p.customerToken ? requireCustomer(p.customerToken) : null;
-  const customerName = customer ? customer.name : String(p.customerName || '').trim();
-  const customerPhone = customer ? customer.phone : normalizePhone(p.customerPhone);
+  if (!p.customerToken) throw new Error('Please log in to make a booking');
+  const customer = requireCustomer(p.customerToken);
+  const customerName = customer.name;
+  const customerPhone = customer.phone;
   if (!p.pickupAddress || !p.dropoffAddress || !customerName || !customerPhone) throw new Error('Missing required fields');
   if (![p.pickupLat, p.pickupLng, p.dropoffLat, p.dropoffLng].every(value => Number.isFinite(Number(value)))) throw new Error('Please select valid pickup and destination addresses');
   const miles = Number(p.miles || 0);
