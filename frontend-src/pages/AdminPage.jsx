@@ -16,6 +16,16 @@ export default function AdminPage() {
   const [editForm, setEditForm] = useState({});
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState('');
+  const [futureOffers, setFutureOffers] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [bids, setBids] = useState([]);
+  const [tariff, setTariff] = useState(null);
+  const [selectedDriverIds, setSelectedDriverIds] = useState([]);
+  const [bulkLetter, setBulkLetter] = useState('');
+  const [bulkCommission, setBulkCommission] = useState('');
+  const [bulkStatus, setBulkStatus] = useState('');
+  const [jobDetail, setJobDetail] = useState(null);
+  const [settleAmounts, setSettleAmounts] = useState({});
   const mapRef = useRef(null);
   const mapObjRef = useRef(null);
   const LRef = useRef(null);
@@ -37,10 +47,22 @@ export default function AdminPage() {
   async function load() {
     try {
       const headers = { 'x-admin-token': token };
-      const [j, d, a] = await Promise.all([apiGet('/admin/jobs', headers), apiGet('/admin/drivers', headers), apiGet('/admin/driver-applications', headers)]);
+      const [j, d, a, fo, al, b, t] = await Promise.all([
+        apiGet('/admin/jobs', headers),
+        apiGet('/admin/drivers', headers),
+        apiGet('/admin/driver-applications', headers),
+        apiGet('/admin/future-offers', headers),
+        apiGet('/admin/audit-log', headers),
+        apiGet('/admin/bids', headers),
+        apiGet('/admin/tariff', headers)
+      ]);
       setJobs(j.jobs);
       setDrivers(d.drivers);
       setApplications(a.applications || []);
+      setFutureOffers(fo.futureOffers || []);
+      setAuditLogs(al.logs || []);
+      setBids(b.bids || []);
+      setTariff(t.tariff || null);
     } catch (err) {
       setError(err.message);
       if (err.message.includes('Admin not authenticated')) {
@@ -206,6 +228,87 @@ export default function AdminPage() {
     }
   }
 
+  async function dispatchFutureOffer(jobId) {
+    setError('');
+    try {
+      await api('admin/future-offers/dispatch', { jobId }, { 'x-admin-token': token });
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function saveTariff(e) {
+    e.preventDefault();
+    setError('');
+    const form = e.target;
+    const body = {
+      car: {
+        day: { firstMile: Number(form['car-day-firstMile'].value), perMile: Number(form['car-day-perMile'].value), waitingPerMinute: Number(form['car-day-waiting'].value) },
+        night: { firstMile: Number(form['car-night-firstMile'].value), perMile: Number(form['car-night-perMile'].value), waitingPerMinute: Number(form['car-night-waiting'].value) }
+      },
+      mpv: {
+        day: { firstMile: Number(form['mpv-day-firstMile'].value), perMile: Number(form['mpv-day-perMile'].value), waitingPerMinute: Number(form['mpv-day-waiting'].value) },
+        night: { firstMile: Number(form['mpv-night-firstMile'].value), perMile: Number(form['mpv-night-perMile'].value), waitingPerMinute: Number(form['mpv-night-waiting'].value) }
+      }
+    };
+    try {
+      await api('admin/tariff', body, { 'x-admin-token': token });
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function adjustSettle(driverId) {
+    setError('');
+    const amount = Number(settleAmounts[driverId]?.amount);
+    const note = settleAmounts[driverId]?.note || '';
+    if (!amount) return;
+    try {
+      await api(`admin/drivers/${driverId}/settle`, { amount: -Math.abs(amount), note }, { 'x-admin-token': token });
+      setSettleAmounts(prev => ({ ...prev, [driverId]: { amount: '', note: '' } }));
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function applyBulk() {
+    setError('');
+    const updates = {};
+    if (bulkLetter) updates.letter = bulkLetter;
+    if (bulkCommission !== '') updates.commission_rate = Number(bulkCommission);
+    if (bulkStatus) updates.status = bulkStatus;
+    try {
+      await api('admin/drivers/bulk', { driverIds: selectedDriverIds, updates }, { 'x-admin-token': token });
+      setSelectedDriverIds([]);
+      setBulkLetter(''); setBulkCommission(''); setBulkStatus('');
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function formatCurrency(n) {
+    return '£' + Number(n || 0).toFixed(2);
+  }
+
+  function exportCSV(rows, filename) {
+    if (!rows.length) return;
+    const keys = Object.keys(rows[0]);
+    const csv = [keys.join(','), ...rows.map(r => keys.map(k => JSON.stringify(r[k] ?? '')).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+  }
+
+  function toggleDriverSelection(id) {
+    setSelectedDriverIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+
   if (!token) {
     return (
       <div className="wj-shell">
@@ -320,14 +423,13 @@ export default function AdminPage() {
         <div key={job.jobId} className="card">
           <p><strong>{job.jobId}</strong> <span className={`badge status-${job.status}`}>{job.status}</span></p>
           <p>{job.pickupAddress} → {job.dropoffAddress}</p>
-          <p>Fare: £{job.fare.toFixed(2)} | {job.vehicleType} | {job.customerPhone}</p>
-          {job.status === 'NEW' && (
-            <div className="row">
-              {drivers.filter(d => d.status === 'AVAILABLE').map(d => (
-                <button key={d.id} onClick={() => assign(job.jobId, d.id)}>Assign {d.name}</button>
-              ))}
-            </div>
-          )}
+          <p>Fare: {formatCurrency(job.fare)} | {job.vehicleType} | {job.customerPhone}</p>
+          <div className="row">
+            <button className="secondary" onClick={() => setJobDetail(job)}>Details</button>
+            {job.status === 'NEW' && drivers.filter(d => d.status === 'AVAILABLE').map(d => (
+              <button key={d.id} onClick={() => assign(job.jobId, d.id)}>Assign {d.name}</button>
+            ))}
+          </div>
           {job.driverId && <p>Assigned driver: {job.driverId}</p>}
         </div>
       ))}
@@ -361,6 +463,38 @@ export default function AdminPage() {
           </div>
         </div>
       ))}
+
+      <h2>Bulk driver tools</h2>
+      <div className="card">
+        <div className="row">
+          <div className="form-group">
+            <label>Future bracket</label>
+            <select value={bulkLetter} onChange={e => setBulkLetter(e.target.value)}>
+              <option value="">—</option>
+              <option value="A">A</option>
+              <option value="B">B</option>
+              <option value="C">C</option>
+              <option value="Pool">Pool</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Commission %</label>
+            <input type="number" min={0} max={100} step="0.01" value={bulkCommission} onChange={e => setBulkCommission(e.target.value)} placeholder="e.g. 10" />
+          </div>
+          <div className="form-group">
+            <label>Status</label>
+            <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}>
+              <option value="">—</option>
+              <option value="AVAILABLE">Available</option>
+              <option value="BREAK">Break</option>
+              <option value="OFFLINE">Offline</option>
+            </select>
+          </div>
+        </div>
+        <p>{selectedDriverIds.length} driver{selectedDriverIds.length === 1 ? '' : 's'} selected</p>
+        <button onClick={applyBulk} disabled={selectedDriverIds.length === 0}>Apply to selected</button>
+        <button className="secondary" style={{ marginLeft: 8 }} onClick={() => exportCSV(drivers, `drivers-${new Date().toISOString().slice(0,10)}.csv`)}>Export drivers CSV</button>
+      </div>
 
       <h2>Drivers</h2>
       {drivers.map(d => (
@@ -403,12 +537,22 @@ export default function AdminPage() {
             </div>
           ) : (
             <div>
-              <p><strong>{d.id}</strong> — {d.name} <span className={`badge ${d.status === 'AVAILABLE' ? 'status-COMPLETE' : 'status-CANCELLED'}`}>{d.status}</span> <button className="secondary" style={{ marginLeft: 8, marginTop: 0, padding: '0.2rem 0.5rem' }} onClick={() => startEdit(d)}>Edit</button></p>
+              <p>
+                <input type="checkbox" checked={selectedDriverIds.includes(d.id)} onChange={() => toggleDriverSelection(d.id)} style={{ marginRight: 8 }} />
+                <strong>{d.id}</strong> — {d.name} <span className={`badge ${d.status === 'AVAILABLE' ? 'status-COMPLETE' : 'status-CANCELLED'}`}>{d.status}</span> <button className="secondary" style={{ marginLeft: 8, marginTop: 0, padding: '0.2rem 0.5rem' }} onClick={() => startEdit(d)}>Edit</button>
+              </p>
               <p style={{ fontSize: '0.85rem' }}>
                 {d.license_type} | {d.vehicle_type} | {d.zone || 'no zone'} | {d.vehicle_make_model_colour} | Reg …{d.reg_last_3} | Exp {d.expiry_date} | Badge {d.badge_number} | {d.phone} | Commission {d.commission_rate || 0}% | Future bracket: {d.letter || 'None'}
               </p>
               <p style={{ fontSize: '0.85rem' }}>
-                <strong>Owed settle: £{Number(d.settle_balance || 0).toFixed(2)}</strong>
+                <strong>Owed settle: {formatCurrency(d.settle_balance)}</strong>
+                <input type="number" step="0.01" placeholder="Payment" style={{ width: 90, marginLeft: 10 }}
+                  value={settleAmounts[d.id]?.amount || ''}
+                  onChange={e => setSettleAmounts(prev => ({ ...prev, [d.id]: { ...prev[d.id], amount: e.target.value } }))} />
+                <input placeholder="Note" style={{ width: 120, marginLeft: 6 }}
+                  value={settleAmounts[d.id]?.note || ''}
+                  onChange={e => setSettleAmounts(prev => ({ ...prev, [d.id]: { ...prev[d.id], note: e.target.value } }))} />
+                <button className="secondary" style={{ marginLeft: 6 }} onClick={() => adjustSettle(d.id)}>Record</button>
               </p>
               {d.last_lat != null && d.last_lng != null && (
                 <p style={{ fontSize: '0.8rem' }}>
@@ -419,6 +563,98 @@ export default function AdminPage() {
           )}
         </div>
       ))}
+
+      <h2>Future bookings</h2>
+      {futureOffers.length === 0 && <p>No active future offers.</p>}
+      {futureOffers.map(fo => (
+        <div key={fo.jobId} className="card">
+          <p><strong>{fo.jobId}</strong> <span className={`badge status-${fo.status}`}>{fo.status}</span></p>
+          <p>{fo.pickupAddress} → {fo.dropoffAddress}</p>
+          <p>Pickup {fo.pickupTime ? new Date(fo.pickupTime).toLocaleString() : '—'} · Fare {formatCurrency(fo.fare)}</p>
+          <p>Offer stage: <strong>{fo.currentLetter || '—'}</strong> · Offered to: {fo.currentDriverId || '—'} · Expires {fo.expiresAt ? new Date(fo.expiresAt).toLocaleTimeString() : '—'}</p>
+          {fo.status === 'SCHEDULED' && fo.currentDriverId && <button onClick={() => dispatchFutureOffer(fo.jobId)}>Dispatch now</button>}
+        </div>
+      ))}
+
+      <h2>Bids board</h2>
+      {bids.length === 0 && <p>No bids.</p>}
+      {bids.map((b, i) => (
+        <div key={i} className="card">
+          <p><strong>{b.job_id}</strong> <span className="badge status-NEW">{b.status}</span></p>
+          <p>Driver {b.driver_id} bid {formatCurrency(b.amount)} · {b.created_at ? new Date(b.created_at).toLocaleString() : '—'}</p>
+        </div>
+      ))}
+
+      <h2>Tariff editor</h2>
+      <div className="card">
+        {tariff ? (
+          <form onSubmit={saveTariff}>
+            <div className="row">
+              {['car', 'mpv'].map(type => (
+                <div key={type} style={{ flex: 1, minWidth: 260 }}>
+                  <h4 style={{ textTransform: 'uppercase' }}>{type}</h4>
+                  {['day', 'night'].map(period => (
+                    <div key={period} style={{ marginBottom: 12 }}>
+                      <strong>{period}</strong>
+                      <div className="row">
+                        <div className="form-group"><label>First mile</label><input type="number" step="0.01" name={`${type}-${period}-firstMile`} defaultValue={tariff[type][period].firstMile} /></div>
+                        <div className="form-group"><label>Per mile</label><input type="number" step="0.01" name={`${type}-${period}-perMile`} defaultValue={tariff[type][period].perMile} /></div>
+                        <div className="form-group"><label>Wait/min</label><input type="number" step="0.01" name={`${type}-${period}-waiting`} defaultValue={tariff[type][period].waitingPerMinute} /></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <button type="submit">Save tariff</button>
+          </form>
+        ) : <p>Loading…</p>}
+      </div>
+
+      <h2>Audit log</h2>
+      <div className="card" style={{ maxHeight: 400, overflow: 'auto' }}>
+        {auditLogs.length === 0 && <p>No recent events.</p>}
+        {auditLogs.length > 0 && (
+          <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse' }}>
+            <thead><tr style={{ textAlign: 'left' }}><th>Time</th><th>Actor</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>
+            <tbody>
+              {auditLogs.map(log => (
+                <tr key={log.id}><td>{log.created_at ? new Date(log.created_at).toLocaleString() : '—'}</td><td>{log.actor_type} {log.actor_id}</td><td>{log.action}</td><td>{log.entity_type} {log.entity_id}</td><td><pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(log.metadata)}</pre></td></tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <h2>Export</h2>
+      <div className="card">
+        <button className="secondary" onClick={() => exportCSV(jobs, `jobs-${new Date().toISOString().slice(0,10)}.csv`)}>Export jobs CSV</button>
+        <button className="secondary" style={{ marginLeft: 8 }} onClick={() => exportCSV(drivers, `drivers-${new Date().toISOString().slice(0,10)}.csv`)}>Export drivers CSV</button>
+      </div>
+
+      {jobDetail && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setJobDetail(null)}>
+          <div className="card" style={{ maxWidth: 600, maxHeight: '80vh', overflow: 'auto', margin: 20 }} onClick={e => e.stopPropagation()}>
+            <h3>{jobDetail.jobId}</h3>
+            <p>Status: <span className={`badge status-${jobDetail.status}`}>{jobDetail.status}</span></p>
+            <p>{jobDetail.pickupAddress} → {jobDetail.dropoffAddress}</p>
+            <p>Customer: {jobDetail.customerName} · {jobDetail.customerPhone}</p>
+            <p>Fare: {formatCurrency(jobDetail.fare)} · Vehicle: {jobDetail.vehicleType}</p>
+            <p>Pickup time: {jobDetail.pickupTime ? new Date(jobDetail.pickupTime).toLocaleString() : '—'}</p>
+            <h4>Timeline</h4>
+            <ul>
+              <li>Created: {jobDetail.createdAt ? new Date(jobDetail.createdAt).toLocaleString() : '—'}</li>
+              {jobDetail.onWayAt && <li>On way: {new Date(jobDetail.onWayAt).toLocaleString()}</li>}
+              {jobDetail.arrivedAt && <li>Arrived: {new Date(jobDetail.arrivedAt).toLocaleString()}</li>}
+              {jobDetail.pobAt && <li>Passenger on board: {new Date(jobDetail.pobAt).toLocaleString()}</li>}
+              {jobDetail.completedAt && <li>Completed: {new Date(jobDetail.completedAt).toLocaleString()}</li>}
+              {jobDetail.cancelledAt && <li>Cancelled: {new Date(jobDetail.cancelledAt).toLocaleString()}</li>}
+            </ul>
+            <button onClick={() => setJobDetail(null)}>Close</button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

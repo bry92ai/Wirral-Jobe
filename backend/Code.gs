@@ -9,10 +9,32 @@ function getZone(lat, lng) {
   return f ? f.properties.zoneId : null;
 }
 
-const TARIFF = {
+const DEFAULT_TARIFF = {
   car: { day: { firstMile: 4.50, perMile: 2.20, waitingPerMinute: 0.30 }, night: { firstMile: 5.50, perMile: 2.80, waitingPerMinute: 0.40 } },
   mpv: { day: { firstMile: 6.50, perMile: 3.20, waitingPerMinute: 0.45 }, night: { firstMile: 7.50, perMile: 3.80, waitingPerMinute: 0.55 } }
 };
+function getTariff() {
+  const stored = PropertiesService.getScriptProperties().getProperty('TARIFF');
+  if (!stored) return DEFAULT_TARIFF;
+  try { const parsed = JSON.parse(stored); return { ...DEFAULT_TARIFF, ...parsed }; } catch (e) { return DEFAULT_TARIFF; }
+}
+function setTariff(tariff) { PropertiesService.getScriptProperties().setProperty('TARIFF', JSON.stringify(tariff)); }
+function updateTariff(body) {
+  if (!body || typeof body !== 'object') throw new Error('Invalid tariff data');
+  const tariff = getTariff();
+  ['car', 'mpv'].forEach(type => {
+    if (!body[type]) return;
+    ['day', 'night'].forEach(period => {
+      if (!body[type][period]) return;
+      ['firstMile', 'perMile', 'waitingPerMinute'].forEach(key => {
+        const v = Number(body[type][period][key]);
+        if (!isNaN(v) && v >= 0) tariff[type][period][key] = v;
+      });
+    });
+  });
+  setTariff(tariff);
+  return { ok: true, tariff };
+}
 
 const AIRPORTS = [
   { name: 'Liverpool', lat: 53.3331, lng: -2.8496, carFare: 60, mpvFare: 75 },
@@ -107,7 +129,14 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'admin/jobs') return requireAdmin(adminToken, () => ({ jobs: getAllJobs() }));
   if (r === 'admin/drivers') return requireAdmin(adminToken, () => ({ drivers: getAllDrivers() }));
   if (r === 'admin/process-future-bookings') return requireAdmin(adminToken, () => { processFutureBookings(); return { ok: true }; });
+  if (r === 'admin/future-offers') return requireAdmin(adminToken, () => ({ futureOffers: getAllFutureOffers() }));
+  if (r === 'admin/future-offers/dispatch') return requireAdmin(adminToken, () => dispatchFutureBooking(body.jobId));
+  if (r === 'admin/tariff') return requireAdmin(adminToken, () => body ? updateTariff(body) : { tariff: getTariff() });
+  if (r === 'admin/audit-log') return requireAdmin(adminToken, () => ({ logs: getAuditLogs(body.limit || 200) }));
+  if (r === 'admin/bids') return requireAdmin(adminToken, () => ({ bids: getAllBids() }));
   if (parts[0] === 'admin' && parts[1] === 'drivers' && parts[3] === 'letter') return requireAdmin(adminToken, () => { setDriverLetter(parts[2], (body || {}).letter); return { ok: true, driverId: parts[2], letter: (body || {}).letter }; });
+  if (parts[0] === 'admin' && parts[1] === 'drivers' && parts[3] === 'settle') return requireAdmin(adminToken, () => adjustDriverSettleBalance(parts[2], body));
+  if (r === 'admin/drivers/bulk') return requireAdmin(adminToken, () => bulkUpdateDrivers(body));
   if (r === 'admin/assign') return requireAdmin(adminToken, () => adminAssign(body));
   if (r === 'admin/driver-applications') return requireAdmin(adminToken, () => ({ applications: getDriverApplications() }));
   if (parts[0] === 'admin' && parts[1] === 'driver-applications' && parts[3] === 'approve-badge') return requireAdmin(adminToken, () => approveDriverBadge(parts[2]));
@@ -1324,11 +1353,95 @@ function dispatchFutureBookings() {
     if (job.status !== 'SCHEDULED') return;
     const pickupTime = new Date(job.pickup_time).getTime();
     if (pickupTime > dispatchCutoff) return;
-    const driver = findDriverById(job.driver_id);
-    updateJob(job.id, { status: 'ASSIGNED', updated_at: new Date().toISOString() });
-    if (driver) updateDriver(job.driver_id, { status: 'BUSY' });
-    writeAudit('system', '', 'future_booking_dispatched', 'job', job.id, { driverId: job.driver_id });
+    dispatchFutureBooking(job.id);
   });
+}
+
+function dispatchFutureBooking(jobId) {
+  const job = findJobById(jobId);
+  if (!job || !job.driver_id || job.status !== 'SCHEDULED') return { ok: false, error: 'Not a scheduled future booking' };
+  const idx = futureOfferRowIndex(jobId);
+  if (idx >= 0) getFutureOffersSheet().deleteRow(idx);
+  const driver = findDriverById(job.driver_id);
+  updateJob(job.id, { status: 'ASSIGNED', updated_at: new Date().toISOString() });
+  if (driver) updateDriver(job.driver_id, { status: 'BUSY' });
+  writeAudit('system', '', 'future_booking_dispatched', 'job', job.id, { driverId: job.driver_id, source: 'admin_force' });
+  return { ok: true, status: 'ASSIGNED', jobId: job.id, driverId: job.driver_id };
+}
+
+function getAllFutureOffers() {
+  advanceFutureOffers();
+  return getFutureOffers().map(o => {
+    const job = findJobById(o.jobId);
+    return {
+      jobId: o.jobId,
+      currentDriverId: o.currentDriverId || '',
+      currentLetter: o.currentLetter || '',
+      offeredLetters: o.offeredLetters || [],
+      offeredDrivers: o.offeredDrivers || [],
+      expiresAt: Number(o.expiresAt),
+      pickupAddress: job?.pickup_address || '',
+      dropoffAddress: job?.dropoff_address || '',
+      pickupTime: job?.pickup_time || '',
+      fare: Number(job?.fare) || 0,
+      status: job?.status || ''
+    };
+  });
+}
+
+function getAuditLogs(limit = 100) {
+  const sheet = getAuditLogSheet();
+  const rows = sheet.getDataRange().getValues();
+  const headers = rows[0] || ['id', 'actor_type', 'actor_id', 'action', 'entity_type', 'entity_id', 'metadata', 'created_at'];
+  const out = [];
+  for (let i = rows.length - 1; i >= 1 && out.length < limit; i--) {
+    const obj = {};
+    headers.forEach((h, idx) => obj[h] = rows[i][idx]);
+    try { obj.metadata = JSON.parse(obj.metadata || '{}'); } catch {}
+    out.push(obj);
+  }
+  return out;
+}
+
+function getAllBids() {
+  return rowsToObjects(getBidsSheet(), BID_HEADERS).map(b => ({
+    ...b,
+    amount: Number(b.amount) || 0,
+    status: b.status || 'pending'
+  }));
+}
+
+function adjustDriverSettleBalance(driverId, body) {
+  const driver = findDriverById(driverId);
+  if (!driver) throw new Error('Driver not found');
+  const amount = Number(body?.amount) || 0;
+  const note = String(body?.note || '');
+  if (amount === 0) throw new Error('Amount required');
+  const newBalance = (Number(driver.settle_balance) || 0) + amount;
+  updateDriver(driverId, { settle_balance: newBalance });
+  writeAudit('admin', '', 'driver_settle_adjusted', 'driver', driverId, { amount, note, newBalance });
+  return { ok: true, driverId, newBalance };
+}
+
+function bulkUpdateDrivers(body) {
+  const ids = (body?.driverIds || []).filter(id => id);
+  const updates = body?.updates || {};
+  const allowed = ['letter', 'commission_rate', 'status'];
+  const fields = {};
+  allowed.forEach(key => {
+    if (updates[key] !== undefined) fields[key] = updates[key];
+  });
+  if (!Object.keys(fields).length) throw new Error('No fields to update');
+  ids.forEach(id => {
+    const driver = findDriverById(id);
+    if (!driver) return;
+    if (fields.letter !== undefined) setDriverLetter(id, fields.letter);
+    const updateFields = {};
+    if (fields.commission_rate !== undefined) updateFields.commission_rate = Number(fields.commission_rate) || 0;
+    if (fields.status !== undefined && ['AVAILABLE', 'BREAK', 'OFFLINE'].includes(fields.status)) updateFields.status = fields.status;
+    updateDriver(id, updateFields);
+  });
+  return { ok: true, updated: ids.length };
 }
 
 // ---------- Admin ----------
@@ -1415,7 +1528,8 @@ function calculateAirportFare(p) {
 
 function calculateFare({ miles, vehicleType, timeOfDay }) {
   const m = Math.max(0, Number(miles) || 0);
-  const rates = (TARIFF[vehicleType] && TARIFF[vehicleType][timeOfDay]) ? TARIFF[vehicleType][timeOfDay] : TARIFF.car.day;
+  const tariff = getTariff();
+  const rates = (tariff[vehicleType] && tariff[vehicleType][timeOfDay]) ? tariff[vehicleType][timeOfDay] : tariff.car.day;
   if (m <= 1) return rates.firstMile;
   return rates.firstMile + rates.perMile * (m - 1);
 }
@@ -1429,7 +1543,8 @@ function getTimeOfDay(date) {
 }
 function getWaitingRate(vehicleType, date) {
   const timeOfDay = getTimeOfDay(date);
-  const rates = (TARIFF[vehicleType] && TARIFF[vehicleType][timeOfDay]) ? TARIFF[vehicleType][timeOfDay] : TARIFF.car.day;
+  const tariff = getTariff();
+  const rates = (tariff[vehicleType] && tariff[vehicleType][timeOfDay]) ? tariff[vehicleType][timeOfDay] : tariff.car.day;
   return Number(rates.waitingPerMinute) || 0;
 }
 
