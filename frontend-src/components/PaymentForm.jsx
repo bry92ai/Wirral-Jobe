@@ -1,21 +1,55 @@
 import { useEffect, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { loadSquarePayments } from '../lib/squarePayments.js';
 
 const SQUARE_APP_ID = import.meta.env.VITE_SQUARE_APPLICATION_ID;
 const SQUARE_LOCATION_ID = import.meta.env.VITE_SQUARE_LOCATION_ID;
 
-export default function PaymentForm({ bookingFee, fare, clientSecret, onConfirm, error, loading }) {
+export default function PaymentForm({
+  bookingFee,
+  fare,
+  clientSecret,
+  onConfirm,
+  error,
+  loading,
+  jobId,
+  outboundJobId,
+  returnJobId
+}) {
   const [ready, setReady] = useState(false);
   const [payLoading, setPayLoading] = useState(false);
   const [payError, setPayError] = useState('');
+  const [browserOpen, setBrowserOpen] = useState(false);
 
   const cardRef = useRef(null);
   const cardContainerRef = useRef(null);
   const googleContainerRef = useRef(null);
   const appleContainerRef = useRef(null);
   const onConfirmRef = useRef(onConfirm);
+  const browserOpenedRef = useRef(false);
 
   useEffect(() => { onConfirmRef.current = onConfirm; }, [onConfirm]);
+
+  // When the system-browser payment tab is closed, check whether the booking is already paid.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let listener;
+    async function setup() {
+      try {
+        listener = await Browser.addListener('browserFinished', () => {
+          if (!browserOpenedRef.current) return;
+          browserOpenedRef.current = false;
+          setBrowserOpen(false);
+          onConfirmRef.current();
+        });
+      } catch (e) {
+        // Browser plugin not available
+      }
+    }
+    setup();
+    return () => { if (listener?.remove) listener.remove(); };
+  }, []);
 
   useEffect(() => {
     if (clientSecret !== 'square' || !SQUARE_APP_ID || !SQUARE_LOCATION_ID) return;
@@ -124,6 +158,35 @@ export default function PaymentForm({ bookingFee, fare, clientSecret, onConfirm,
     }
   }
 
+  async function openBrowserPayment() {
+    const params = new URLSearchParams();
+    if (outboundJobId && returnJobId) {
+      params.set('outboundJobId', outboundJobId);
+      params.set('returnJobId', returnJobId);
+    } else if (jobId) {
+      params.set('jobId', jobId);
+    } else {
+      setPayError('Cannot open browser payment: job details are missing.');
+      return;
+    }
+    params.set('bookingFee', Number(bookingFee).toFixed(2));
+    params.set('fare', Number(fare).toFixed(2));
+    const url = `${window.location.origin}/wallet-pay?${params.toString()}`;
+
+    browserOpenedRef.current = true;
+    setBrowserOpen(true);
+    try {
+      await Browser.open({ url });
+    } catch (e) {
+      browserOpenedRef.current = false;
+      setBrowserOpen(false);
+      setPayError('Could not open the browser payment page. Please enter your card above.');
+    }
+  }
+
+  const hasJobContext = !!(jobId || (outboundJobId && returnJobId));
+  const showBrowserOption = Capacitor.isNativePlatform() && hasJobContext;
+
   if (clientSecret !== 'square') {
     return (
       <div>
@@ -159,6 +222,21 @@ export default function PaymentForm({ bookingFee, fare, clientSecret, onConfirm,
           <button className="wj-details-submit" onClick={payWithCard} disabled={!ready || payLoading || loading}>
             {payLoading || loading ? 'Processing…' : `Pay £${Number(bookingFee).toFixed(2)} booking fee`} <b>›</b>
           </button>
+
+          {showBrowserOption && (
+            <>
+              <div style={{ textAlign: 'center', color: 'var(--cream-dim)', fontSize: '0.85rem', margin: '0.75rem 0' }}>or</div>
+              <button
+                type="button"
+                className="wj-text-button"
+                onClick={openBrowserPayment}
+                disabled={browserOpen || loading || payLoading}
+                style={{ display: 'block', margin: '0 auto' }}
+              >
+                {browserOpen ? 'Waiting for browser payment…' : 'Pay with saved card / Google Pay / Apple Pay'}
+              </button>
+            </>
+          )}
         </>
       )}
     </div>
