@@ -41,17 +41,212 @@ const AIRPORTS = [
   { name: 'Manchester', lat: 53.3537, lng: -2.2740, carFare: 75, mpvFare: 90 }
 ];
 
-const JOB_HEADERS = ['created_at','id','status','driver_id','customer_name','customer_phone','pickup_address','dropoff_address','pickup_lat','pickup_lng','dropoff_lat','dropoff_lng','pickup_time','vehicle_type','miles','fare','booking_fee','payment_id','payment_status','commission_rate','commission_amount','tracking_token','on_way_at','arrived_at','pob_at','completed_at','customer_id','passengers','notes','return_job_id','cancelled_at','updated_at'];
-const DRIVER_HEADERS = ['id','name','phone','pin','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','status','zone','last_lat','last_lng','last_location_at','commission_rate','settle_balance','available_since','created_at','updated_at','pin_hash'];
+const JOB_HEADERS = ['created_at','id','status','driver_id','customer_name','customer_phone','pickup_address','dropoff_address','pickup_lat','pickup_lng','dropoff_lat','dropoff_lng','pickup_time','vehicle_type','miles','fare','booking_fee','payment_id','payment_status','commission_rate','commission_amount','tracking_token','on_way_at','arrived_at','pob_at','completed_at','customer_id','passengers','notes','return_job_id','cancelled_at','updated_at','journey_pin'];
+const DRIVER_HEADERS = ['id','name','phone','pin','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','status','zone','last_lat','last_lng','last_location_at','commission_rate','settle_balance','available_since','created_at','updated_at','pin_hash','fcm_token'];
 const OFFER_HEADERS = ['jobId','currentDriverId','offeredDrivers','expiresAt','pickupLat','pickupLng'];
 const BID_HEADERS = ['created_at','job_id','driver_id','amount','status'];
-const CUSTOMER_HEADERS = ['id','name','phone','email','pin_hash','created_at'];
+const CUSTOMER_HEADERS = ['id','name','phone','pin_hash','created_at','status','updated_at','last_login_at','fcm_token'];
 const PLACE_HEADERS = ['id','customer_id','label','address','lat','lng','type','created_at'];
 const DRIVER_APPLICATION_HEADERS = ['id','status','badge_url','badge_public_id','continuation_token','name','phone','pin_hash','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','created_at','submitted_at','reviewed_at','reviewed_by','rejection_reason','driver_id'];
 
-const SEED_DRIVERS = [
-  { id: 'DRV-001', name: 'Dave', phone: '07700111000', pin: '1234', vehicle_type: 'car', license_type: 'private_hire', vehicle_make_model_colour: '', reg_last_3: '', expiry_date: '', badge_number: '', commission_rate: 0 },
-  { id: 'DRV-002', name: 'Sarah', phone: '07700222000', pin: '5678', vehicle_type: 'mpv', license_type: 'private_hire', vehicle_make_model_colour: '', reg_last_3: '', expiry_date: '', badge_number: '', commission_rate: 0 }
+
+const SMS_TEMPLATES = [
+  {
+    key: "customer-ride-now-booking-received-1-confirmed",
+    recipient: "Customer",
+    jobType: "Ride now",
+    message: "Booking received + \u00a31 confirmed",
+    template: "Hi {customer_first_name}, your \u00a31 booking fee has been confirmed and your Wirral Jobe ride request is now active. We\u2019re finding a suitable local driver. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-ride-now-driver-allocated-on-the-way",
+    recipient: "Customer",
+    jobType: "Ride now",
+    message: "Driver allocated + on the way",
+    template: "Good news \u2014 {driver_first_name} is your driver for booking {booking_reference} and is now on the way. Vehicle: {vehicle_make_model}. Registration: {vehicle_registration}. Estimated arrival: {eta_minutes} minutes. Track your driver: {tracking_link}"
+  },
+  {
+    key: "customer-ride-now-driver-arrived-journey-pin",
+    recipient: "Customer",
+    jobType: "Ride now",
+    message: "Driver arrived + journey PIN",
+    template: "Your Wirral Jobe driver has arrived at the pickup point. Your journey PIN is {journey_pin}. Please give this PIN to your driver before the journey begins. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-ride-now-journey-completed",
+    recipient: "Customer",
+    jobType: "Ride now",
+    message: "Journey completed",
+    template: "Thanks for travelling with The Wirral Jobe. Booking {booking_reference} is now complete. We hope you had a good journey."
+  },
+  {
+    key: "customer-future-booking-booking-received-1-confirmed",
+    recipient: "Customer",
+    jobType: "Future booking",
+    message: "Booking received + \u00a31 confirmed",
+    template: "Hi {customer_first_name}, your \u00a31 booking fee has been confirmed and your Wirral Jobe booking is active for {journey_date} at {journey_time}. Pickup: {pickup_area}. Destination: {destination_area}. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-future-booking-one-week-reminder",
+    recipient: "Customer",
+    jobType: "Future booking",
+    message: "One-week reminder",
+    template: "Reminder: your Wirral Jobe booking is one week away. {journey_date} at {journey_time}, from {pickup_area} to {destination_area}. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-future-booking-24-hour-reminder",
+    recipient: "Customer",
+    jobType: "Future booking",
+    message: "24-hour reminder",
+    template: "Your Wirral Jobe booking is tomorrow at {journey_time}. Please check your pickup details here: {booking_link}. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-future-booking-journey-completed",
+    recipient: "Customer",
+    jobType: "Future booking",
+    message: "Journey completed",
+    template: "Thanks for travelling with The Wirral Jobe. Booking {booking_reference} is now complete. We hope you had a good journey."
+  },
+  {
+    key: "customer-airport-one-way-outward-booking-received-1-confirmed",
+    recipient: "Customer",
+    jobType: "Airport \u2014 one-way outward",
+    message: "Booking received + \u00a31 confirmed",
+    template: "Hi {customer_first_name}, your \u00a31 booking fee has been confirmed and your transfer to {airport_name} is active for {journey_date} at {pickup_time}. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-airport-one-way-outward-one-week-reminder",
+    recipient: "Customer",
+    jobType: "Airport \u2014 one-way outward",
+    message: "One-week reminder",
+    template: "Reminder: your Wirral Jobe airport transfer to {airport_name} is one week away. Pickup is {journey_date} at {pickup_time}. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-airport-one-way-outward-24-hour-outward-reminder",
+    recipient: "Customer",
+    jobType: "Airport \u2014 one-way outward",
+    message: "24-hour outward reminder",
+    template: "Your Wirral Jobe airport transfer to {airport_name} is tomorrow at {pickup_time}. Please be ready at the confirmed pickup point. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-airport-one-way-outward-journey-completed",
+    recipient: "Customer",
+    jobType: "Airport \u2014 one-way outward",
+    message: "Journey completed",
+    template: "Your Wirral Jobe journey to {airport_name} is now complete. Thank you for travelling with us. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-airport-one-way-return-booking-received-1-confirmed",
+    recipient: "Customer",
+    jobType: "Airport \u2014 one-way return",
+    message: "Booking received + \u00a31 confirmed",
+    template: "Hi {customer_first_name}, your \u00a31 booking fee has been confirmed and your return transfer from {airport_name} is active for flight {flight_number} on {flight_date}. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-airport-one-way-return-one-week-reminder",
+    recipient: "Customer",
+    jobType: "Airport \u2014 one-way return",
+    message: "One-week reminder",
+    template: "Reminder: your Wirral Jobe airport return from {airport_name} is one week away. Flight: {flight_number} on {flight_date}. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-airport-one-way-return-24-hour-return-flight-monitoring",
+    recipient: "Customer",
+    jobType: "Airport \u2014 one-way return",
+    message: "24-hour return + flight monitoring",
+    template: "Your Wirral Jobe airport return is tomorrow. We\u2019ll monitor flight {flight_number} and adjust your pickup planning if the arrival time changes. No action is needed unless we contact you. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-airport-one-way-return-journey-completed",
+    recipient: "Customer",
+    jobType: "Airport \u2014 one-way return",
+    message: "Journey completed",
+    template: "Your Wirral Jobe airport return journey is now complete. Thank you for travelling with us. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-airport-two-way-outward-leg-two-way-booking-received-1-confirmed",
+    recipient: "Customer",
+    jobType: "Airport \u2014 two-way outward leg",
+    message: "Two-way booking received + \u00a31 confirmed",
+    template: "Hi {customer_first_name}, your \u00a31 booking fee has been confirmed and both journeys in your Wirral Jobe airport booking are active. Outward: {outward_date} at {outward_time} to {airport_name}. Return flight: {return_flight_number} on {return_date}. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-airport-two-way-outward-leg-one-week-outward-reminder",
+    recipient: "Customer",
+    jobType: "Airport \u2014 two-way outward leg",
+    message: "One-week outward reminder",
+    template: "Reminder: the outward journey for booking {booking_reference} is one week away. Pickup is {outward_date} at {outward_time} for {airport_name}. Your return journey remains active."
+  },
+  {
+    key: "customer-airport-two-way-outward-leg-24-hour-outward-reminder",
+    recipient: "Customer",
+    jobType: "Airport \u2014 two-way outward leg",
+    message: "24-hour outward reminder",
+    template: "Your outward Wirral Jobe airport transfer to {airport_name} is tomorrow at {outward_time}. Please be ready at the confirmed pickup point. Booking reference: {booking_reference}."
+  },
+  {
+    key: "customer-airport-two-way-outward-leg-outward-leg-completed",
+    recipient: "Customer",
+    jobType: "Airport \u2014 two-way outward leg",
+    message: "Outward leg completed",
+    template: "The outward journey on booking {booking_reference} is now complete. Your return journey remains active."
+  },
+  {
+    key: "customer-airport-two-way-return-leg-24-hour-return-flight-monitoring",
+    recipient: "Customer",
+    jobType: "Airport \u2014 two-way return leg",
+    message: "24-hour return + flight monitoring",
+    template: "Your return journey for booking {booking_reference} is tomorrow. We\u2019ll monitor flight {flight_number} and adjust your pickup planning if the arrival time changes. No action is needed unless we contact you."
+  },
+  {
+    key: "customer-airport-two-way-return-leg-return-leg-completed",
+    recipient: "Customer",
+    jobType: "Airport \u2014 two-way return leg",
+    message: "Return leg completed",
+    template: "Your return journey is now complete, and both legs of booking {booking_reference} have been completed. Thank you for travelling with The Wirral Jobe."
+  },
+  {
+    key: "customer-all-job-types-customer-cancelled",
+    recipient: "Customer",
+    jobType: "All job types",
+    message: "Customer cancelled",
+    template: "Hi {customer_first_name}, {cancelled_scope} on booking {booking_reference} has been cancelled as requested. {remaining_leg_status} Any applicable refund will be processed automatically."
+  },
+  {
+    key: "customer-all-job-types-customer-no-show",
+    recipient: "Customer",
+    jobType: "All job types",
+    message: "Customer no-show",
+    template: "Hi {customer_first_name}, your driver attended the confirmed pickup point for booking {booking_reference}, but was unable to locate you. The journey has been recorded as a customer no-show. Please contact Wirral Jobe if you believe this is incorrect."
+  },
+  {
+    key: "driver-future-booking-future-job-offer",
+    recipient: "Driver",
+    jobType: "Future booking",
+    message: "Future job offer",
+    template: "Future booking available: {journey_date} at {journey_time}. Pickup: {pickup_area}. Destination: {destination_area}. Passengers: {passenger_count}. Vehicle required: {vehicle_type}. Accept job: {secure_accept_link} Decline job: {secure_decline_link} This offer expires in 12 hours."
+  },
+  {
+    key: "driver-airport-one-way-outward-airport-outward-job-offer",
+    recipient: "Driver",
+    jobType: "Airport \u2014 one-way outward",
+    message: "Airport outward job offer",
+    template: "Airport job available: {journey_date} at {pickup_time}. Pickup: {pickup_area}. Airport: {airport_name}. Passengers: {passenger_count}. Vehicle required: {vehicle_type}. Accept job: {secure_accept_link} Decline job: {secure_decline_link} This offer expires in 12 hours."
+  },
+  {
+    key: "driver-airport-one-way-return-airport-return-job-offer",
+    recipient: "Driver",
+    jobType: "Airport \u2014 one-way return",
+    message: "Airport return job offer",
+    template: "Airport return job available: {flight_date}. Airport: {airport_name}. Flight: {flight_number}. Destination: {destination_area}. Passengers: {passenger_count}. Vehicle required: {vehicle_type}. Accept job: {secure_accept_link} Decline job: {secure_decline_link} This offer expires in 12 hours."
+  },
+  {
+    key: "driver-airport-two-way-booking-two-way-airport-job-offer",
+    recipient: "Driver",
+    jobType: "Airport \u2014 two-way booking",
+    message: "Two-way airport job offer",
+    template: "Two-way airport booking available. Outward: {outward_date} at {outward_time}, {pickup_area} to {airport_name}. Return: flight {return_flight_number} on {return_date}, {airport_name} to {return_destination_area}. Accept both jobs: {secure_accept_link} Decline both jobs: {secure_decline_link} This offer expires in 12 hours."
+  },
 ];
 
 function doGet(e) { return handleRequest(e); }
@@ -68,6 +263,8 @@ function handleRequest(e) {
     if ((!body || Object.keys(body).length === 0) && params.payload) {
       try { body = JSON.parse(params.payload); } catch (err) {}
     }
+    if (body.payload && typeof body.payload === 'object') body = { ...body, ...body.payload };
+    if (body.auth && typeof body.auth === 'object') body = { ...body, ...body.auth };
     body = { ...params, ...body };
     const route = body.route || params.route || (pathInfo ? '/' + pathInfo : '') || '';
     const driverId = body.driverId || params.driverId || '';
@@ -89,10 +286,11 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   const parts = r.split('/').filter(Boolean);
 
   if (r === 'ping') return { ok: true, time: new Date().toISOString() };
-  if (r === 'setup') return requireAdmin(adminToken, () => setupSeed());
   if (r === 'drivers') return { drivers: getAvailableDrivers() };
   if (r === 'booking') return createBooking(body);
+  if (r === 'booking/return-pair') return createReturnPair(body);
   if (r === 'booking/confirm') return confirmBooking(body);
+  if (r === 'booking/confirm-pair') return confirmReturnPair(body);
   if (r === 'tracking' && parts.length >= 2) return getTracking(parts[1]);
   if (r === 'customer/request-otp') return customerRequestOtp(body);
   if (r === 'customer/register') return customerRegister(body);
@@ -104,10 +302,12 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'customer/places') return getCustomerPlaces(body.customerToken);
   if (r === 'customer/places/add') return addCustomerPlace(body.customerToken, body);
   if (r === 'customer/places/delete') return deleteCustomerPlace(body.customerToken, body.placeId);
+  if (r === 'customer/register-push') return customerRegisterPush(body);
   if (r === 'driver/applications/upload-signature') return driverBadgeUploadSignature();
   if (r === 'driver/applications/start') return startDriverApplication(body);
   if (parts[0] === 'driver' && parts[1] === 'applications' && parts.length === 3) return getDriverApplication(parts[2]);
   if (parts[0] === 'driver' && parts[1] === 'applications' && parts[3] === 'submit') return submitDriverApplication(parts[2], body);
+  if (r === 'driver/register-push') return driverRegisterPush(body);
   if (r === 'driver/login') return driverLogin(body);
   if (r === 'driver/logout') return driverLogout(body, driverId, driverToken);
   if (r === 'driver/me') return getDriverMe(requireDriver(driverId, driverToken).id);
@@ -127,9 +327,13 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (parts[0] === 'driver' && parts[1] === 'jobs' && parts[3] === 'status') return setJobStatus(parts[2], body, requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'jobs' && parts[3] === 'vehicle') return changeJobVehicle(parts[2], body, requireDriver(driverId, driverToken).id);
   if (r === 'driver/location') return updateDriverLocation(body, requireDriver(driverId, driverToken).id);
+  if (r === 'driver/secure-action') return handleSecureDriverAction(body);
   if (r === 'admin/login') return adminLogin(body);
+  if (r === 'admin/sms-templates') return requireAdmin(adminToken, () => ({ templates: getSmsTemplatesWithConfig() }));
+  if (r === 'admin/pending-sms') return requireAdmin(adminToken, () => ({ messages: getAdminPendingSms() }));
+  if (r === 'admin/sms-config') return requireAdmin(adminToken, () => body ? updateSmsConfig(body) : { disabled: getSmsDisabledKeys() });
   if (r === 'admin/jobs') return requireAdmin(adminToken, () => ({ jobs: getAllJobs() }));
-  if (r === 'admin/drivers') return requireAdmin(adminToken, () => ({ drivers: getAllDrivers() }));
+  if (r === 'admin/drivers') return requireAdmin(adminToken, () => (body && body.id && body.name ? createAdminDriver(body) : { drivers: getAllDrivers() }));
   if (r === 'admin/process-future-bookings') return requireAdmin(adminToken, () => { processFutureBookings(); return { ok: true }; });
   if (r === 'admin/future-offers') return requireAdmin(adminToken, () => ({ futureOffers: getAllFutureOffers() }));
   if (r === 'admin/future-offers/dispatch') return requireAdmin(adminToken, () => dispatchFutureBooking(body.jobId));
@@ -243,35 +447,34 @@ function getCustomerOtpsSheet() { return ensureSheet('CustomerOTPs', ['phone', '
 function cleanupCustomerOtps(phone) {
   const sheet = getCustomerOtpsSheet();
   const rows = sheet.getDataRange().getValues();
-  for (let i = rows.length - 1; i >= 1; i--) if (rows[i][0] === phone) sheet.deleteRow(i + 1);
+  for (let i = rows.length - 1; i >= 1; i--) if (normalizePhone(rows[i][0]) === phone) sheet.deleteRow(i + 1);
 }
 function createCustomerOtp(phone, name, email) {
   cleanupCustomerOtps(phone);
   const otp = String(Math.floor(100000 + Math.random() * 900000));
   const expiresAt = Date.now() + 10 * 60000;
   getCustomerOtpsSheet().appendRow([phone, otp, name, email || '', 'false', expiresAt, new Date().toISOString()]);
+  Logger.log('OTP created for %s, expiresAt=%s', phone, expiresAt);
   return { otp, expiresAt };
 }
 function verifyCustomerOtp(phone, otp) {
   const sheet = getCustomerOtpsSheet();
   const rows = sheet.getDataRange().getValues();
+  const entered = String(otp || '').trim();
+  Logger.log('verifyCustomerOtp phone=%s enteredOtp=%s rows=%s', phone, entered, rows.length);
   for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0] === phone && String(rows[i][1]) === otp) {
-      if (Date.now() > Number(rows[i][5])) throw new Error('OTP has expired');
+    Logger.log('  row %s: phone=%s otp=%s expiresAt=%s', i, rows[i][0], rows[i][1], rows[i][5]);
+  }
+  let found = false;
+  for (let i = 1; i < rows.length; i++) {
+    if (normalizePhone(rows[i][0]) === phone && String(rows[i][1]).trim() === entered) {
+      found = true;
+      if (Date.now() > Number(rows[i][5])) throw new Error('This code has expired. Please request a new one.');
       return { name: rows[i][2], email: rows[i][3] };
     }
   }
-  throw new Error('Invalid OTP');
-}
-
-function setupSeed() {
-  ensureDrivers();
-  return { ok: true, drivers: getDrivers().map(d => ({ id: d.id, name: d.name, status: d.status })) };
-}
-
-function seedDemoDrivers() {
-  ensureDrivers();
-  return { ok: true, drivers: getDrivers().map(d => ({ id: d.id, name: d.name, pin: d.pin, status: d.status })) };
+  if (found) throw new Error('This code has expired. Please request a new one.');
+  throw new Error('The code you entered is incorrect. Please check your messages and try again.');
 }
 
 function rowsToObjects(sheet, headers) {
@@ -292,16 +495,7 @@ function findRowIndex(sheet, predicate) {
 }
 
 function ensureDrivers() {
-  const sheet = getDriversSheet();
-  if (sheet.getLastRow() <= 1) {
-    const now = new Date().toISOString();
-    SEED_DRIVERS.forEach(d => {
-      sheet.appendRow([
-        d.id, d.name, d.phone, d.pin, d.vehicle_type, d.license_type, d.vehicle_make_model_colour,
-        d.reg_last_3, d.expiry_date, d.badge_number, 'AVAILABLE', '', '', '', '', d.commission_rate, 0, now
-      ]);
-    });
-  }
+  return getDriversSheet();
 }
 
 // ---------- Customers ----------
@@ -309,9 +503,11 @@ function ensureDrivers() {
 function getCustomersSheet() { return ensureSheet('Customers', CUSTOMER_HEADERS); }
 function getPlacesSheet() { return ensureSheet('Saved Places', PLACE_HEADERS); }
 function normalizePhone(phone) {
-  const raw = String(phone || '').replace(/[\s()-]/g, '');
+  let raw = String(phone || '').replace(/[\s().-]/g, '');
   if (raw.startsWith('+')) return raw;
+  if (raw.startsWith('44') && raw.length >= 10) return '+' + raw;
   if (raw.startsWith('0')) return '+44' + raw.substring(1);
+  if (raw.startsWith('7') && raw.length >= 10) return '+44' + raw;
   return raw;
 }
 function hashPin(pin) {
@@ -320,7 +516,7 @@ function hashPin(pin) {
 }
 function newPin() { return String(Math.floor(100000 + Math.random() * 900000)); }
 function getCustomers() { return rowsToObjects(getCustomersSheet(), CUSTOMER_HEADERS); }
-function findCustomerByPhone(phone) { return getCustomers().find(c => c.phone === normalizePhone(phone)); }
+function findCustomerByPhone(phone) { return getCustomers().find(c => normalizePhone(c.phone) === normalizePhone(phone)); }
 function customerSession(customerId) {
   const token = Utilities.getUuid();
   setCustomerToken(customerId, token);
@@ -351,6 +547,315 @@ function sendTwilioSms(to, body) {
 }
 function customerResponse(customer) { return { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email || '' }; }
 function customerSmsEnabled() { return PropertiesService.getScriptProperties().getProperty('SMS_ENABLED') === 'true'; }
+
+function getSmsTemplate(key) { return SMS_TEMPLATES.find(t => t.key === key); }
+
+function getSmsDisabledKeys() {
+  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty('SMS_DISABLED_KEYS') || '[]'); } catch (e) { return []; }
+}
+function setSmsDisabledKeys(keys) { PropertiesService.getScriptProperties().setProperty('SMS_DISABLED_KEYS', JSON.stringify(keys)); }
+function isSmsEnabled(key) { return customerSmsEnabled() && !getSmsDisabledKeys().includes(key); }
+
+function areaFrom(address) { return String(address || '').split(',')[0].trim(); }
+function formatSmsDate(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function formatSmsTime(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+function generateJourneyPin() { return String(Math.floor(1000 + Math.random() * 9000)); }
+
+function publicAppUrl() { return PropertiesService.getScriptProperties().getProperty('PUBLIC_APP_URL') || ''; }
+function buildTrackingLink(token) { const base = publicAppUrl(); return base ? base + '/track/' + encodeURIComponent(token) : ''; }
+function buildBookingLink(job) { const base = publicAppUrl(); return base ? base + '/booking/' + encodeURIComponent(job.id) + '?token=' + encodeURIComponent(job.tracking_token) : ''; }
+
+function secureActionToken(jobId, driverId, action) {
+  const secret = PropertiesService.getScriptProperties().getProperty('SECURE_LINK_SECRET');
+  if (!secret) return '';
+  const signature = Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_256, jobId + ':' + driverId + ':' + action, secret);
+  return signature.map(b => (b + 256).toString(16).slice(-2)).join('');
+}
+function buildSecureActionLink(jobId, driverId, action) {
+  const base = publicAppUrl();
+  const token = secureActionToken(jobId, driverId, action);
+  if (!base || !token) return '';
+  return base + '/driver-action?jobId=' + encodeURIComponent(jobId) + '&driverId=' + encodeURIComponent(driverId) + '&action=' + encodeURIComponent(action) + '&token=' + token;
+}
+
+function renderSmsBody(key, data) {
+  const template = getSmsTemplate(key);
+  if (!template) return null;
+  let body = template.template;
+  Object.keys(data).forEach(placeholder => {
+    body = body.split('{' + placeholder + '}').join(String(data[placeholder] || ''));
+  });
+  return body;
+}
+
+function sendTemplatedSms(phone, key, data) {
+  const template = getSmsTemplate(key);
+  if (!template) { Logger.log('SMS template not found: %s', key); return false; }
+  if (!isSmsEnabled(key)) { Logger.log('SMS disabled by config: %s', key); return false; }
+  const body = renderSmsBody(key, data);
+  if (!body || !phone) { Logger.log('No phone number for SMS %s', key); return false; }
+  try { sendTwilioSms(phone, body); return true; } catch (e) { Logger.log('Failed to send SMS %s: %s', key, e.message); return false; }
+}
+
+function sendCustomerOtpSms(phone, otp) {
+  if (!customerSmsEnabled() || !phone) { Logger.log('OTP SMS not sent: disabled or no phone'); return false; }
+  const body = 'Your Wirral Jobe verification code is ' + otp + '. It expires in 10 minutes.';
+  try { sendTwilioSms(phone, body); return true; } catch (e) { Logger.log('Failed to send OTP SMS: %s', e.message); return false; }
+}
+
+function isAirportJob(job) {
+  const p = { pickupLat: Number(job.pickup_lat), pickupLng: Number(job.pickup_lng), dropoffLat: Number(job.dropoff_lat), dropoffLng: Number(job.dropoff_lng), vehicleType: job.vehicle_type || 'car' };
+  return calculateAirportFare(p) != null;
+}
+
+function getAirportName(job) {
+  const p = { pickupLat: Number(job.pickup_lat), pickupLng: Number(job.pickup_lng), dropoffLat: Number(job.dropoff_lat), dropoffLng: Number(job.dropoff_lng), vehicleType: job.vehicle_type || 'car' };
+  for (const a of AIRPORTS) {
+    if (distanceMiles(p.pickupLat, p.pickupLng, a.lat, a.lng) <= 2 || distanceMiles(p.dropoffLat, p.dropoffLng, a.lat, a.lng) <= 2) return a.name;
+  }
+  return '';
+}
+
+function isDropoffNearAirport(job) {
+  for (const a of AIRPORTS) if (distanceMiles(Number(job.dropoff_lat), Number(job.dropoff_lng), a.lat, a.lng) <= 2) return true;
+  return false;
+}
+function isPickupNearAirport(job) {
+  for (const a of AIRPORTS) if (distanceMiles(Number(job.pickup_lat), Number(job.pickup_lng), a.lat, a.lng) <= 2) return true;
+  return false;
+}
+
+function isFutureBooking(job) {
+  const pickupTime = new Date(job.pickup_time || new Date().toISOString()).getTime();
+  return pickupTime > Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
+}
+
+function etaMinutes(job, driver) {
+  if (!driver || driver.last_lat === '' || driver.last_lng === '') return '';
+  const miles = distanceMiles(Number(driver.last_lat), Number(driver.last_lng), Number(job.pickup_lat), Number(job.pickup_lng));
+  const minutes = Math.round(miles / 20 * 60);
+  return minutes < 1 ? '1' : String(minutes);
+}
+
+function customerSmsData(job, extra) {
+  const data = {
+    customer_first_name: String(job.customer_name || '').split(' ')[0],
+    booking_reference: job.id,
+    journey_date: formatSmsDate(job.pickup_time),
+    journey_time: formatSmsTime(job.pickup_time),
+    pickup_time: formatSmsTime(job.pickup_time),
+    pickup_area: areaFrom(job.pickup_address),
+    destination_area: areaFrom(job.dropoff_address),
+    airport_name: getAirportName(job),
+    flight_number: '',
+    flight_date: '',
+    outward_date: formatSmsDate(job.pickup_time),
+    outward_time: formatSmsTime(job.pickup_time),
+    return_flight_number: '',
+    return_date: '',
+    return_destination_area: '',
+    driver_first_name: '',
+    vehicle_make_model: '',
+    vehicle_registration: '',
+    eta_minutes: '',
+    tracking_link: '',
+    journey_pin: '',
+    booking_link: buildBookingLink(job),
+    cancelled_scope: 'The journey',
+    remaining_leg_status: ''
+  };
+  if (extra) Object.keys(extra).forEach(k => { if (extra[k] !== undefined) data[k] = extra[k]; });
+  return data;
+}
+
+function driverSmsData(job, driver, extra) {
+  const data = customerSmsData(job, extra || {});
+  data.passenger_count = Number(job.passengers) || 1;
+  data.vehicle_type = job.vehicle_type || 'car';
+  data.secure_accept_link = buildSecureActionLink(job.id, driver.id, 'accept');
+  data.secure_decline_link = buildSecureActionLink(job.id, driver.id, 'decline');
+  return data;
+}
+
+function customerJobTypeKey(baseMessage, job) {
+  if (job.return_job_id) return 'customer-airport-two-way-outward-leg-' + baseMessage;
+  if (isAirportJob(job)) {
+    if (isDropoffNearAirport(job)) return 'customer-airport-one-way-outward-' + baseMessage;
+    return 'customer-airport-one-way-return-' + baseMessage;
+  }
+  if (isFutureBooking(job)) return 'customer-future-booking-' + baseMessage;
+  return 'customer-ride-now-' + baseMessage;
+}
+
+function driverOfferKey(job) {
+  if (job.return_job_id) return 'driver-airport-two-way-booking-two-way-airport-job-offer';
+  if (isAirportJob(job)) {
+    if (isDropoffNearAirport(job)) return 'driver-airport-one-way-outward-airport-outward-job-offer';
+    return 'driver-airport-one-way-return-airport-return-job-offer';
+  }
+  return 'driver-future-booking-future-job-offer';
+}
+
+function sendCustomerSms(job, key, extra) {
+  return sendTemplatedSms(job.customer_phone, key, customerSmsData(job, extra));
+}
+
+function sendDriverOfferSms(job, driver) {
+  const key = driverOfferKey(job);
+  const extra = {};
+  if (job.return_job_id) {
+    const returnJob = findJobById(job.return_job_id);
+    if (returnJob) {
+      extra.return_flight_number = returnJob.notes && JSON.parse(returnJob.notes || '{}').flight_number ? JSON.parse(returnJob.notes || '{}').flight_number : '';
+      extra.return_date = formatSmsDate(returnJob.pickup_time);
+      extra.return_destination_area = areaFrom(returnJob.dropoff_address);
+      extra.outward_date = formatSmsDate(job.pickup_time);
+      extra.outward_time = formatSmsTime(job.pickup_time);
+    }
+  }
+  return sendTemplatedSms(driver.phone, key, driverSmsData(job, driver, extra));
+}
+
+function sendBookingConfirmedSms(job) {
+  const key = customerJobTypeKey('booking-received-1-confirmed', job);
+  return sendCustomerSms(job, key);
+}
+
+function sendDriverAllocatedSms(job, driver) {
+  if (!driver) return false;
+  const key = customerJobTypeKey('driver-allocated-on-the-way', job);
+  if (!getSmsTemplate(key)) return false;
+  return sendCustomerSms(job, key, {
+    driver_first_name: String(driver.name || '').split(' ')[0],
+    vehicle_make_model: driver.vehicle_make_model_colour || '',
+    vehicle_registration: driver.reg_last_3 || '',
+    eta_minutes: etaMinutes(job, driver),
+    tracking_link: buildTrackingLink(job.tracking_token)
+  });
+}
+
+function sendDriverArrivedSms(job) {
+  const key = customerJobTypeKey('driver-arrived-journey-pin', job);
+  if (!getSmsTemplate(key)) return false;
+  const pin = job.journey_pin || generateJourneyPin();
+  if (!job.journey_pin) updateJob(job.id, { journey_pin: pin });
+  return sendCustomerSms(job, key, { journey_pin: pin });
+}
+
+function sendJourneyCompletedSms(job) {
+  const baseMessage = job.return_job_id ? 'outward-leg-completed' : 'journey-completed';
+  const key = customerJobTypeKey(baseMessage, job);
+  return sendCustomerSms(job, key);
+}
+
+function sendCustomerCancelledSms(job, scope, remaining) {
+  return sendCustomerSms(job, 'customer-all-job-types-customer-cancelled', { cancelled_scope: scope || 'The journey', remaining_leg_status: remaining || '' });
+}
+
+function sendCustomerNoShowSms(job) {
+  return sendCustomerSms(job, 'customer-all-job-types-customer-no-show');
+}
+
+function getSmsTemplatesWithConfig() {
+  const disabled = getSmsDisabledKeys();
+  return SMS_TEMPLATES.map(t => ({ key: t.key, recipient: t.recipient, jobType: t.jobType, message: t.message, enabled: !disabled.includes(t.key) }));
+}
+
+function updateSmsConfig(body) {
+  if (!body || !body.key) throw new Error('Missing template key');
+  const enabled = body.enabled === true || body.enabled === 'true';
+  const disabled = getSmsDisabledKeys();
+  const idx = disabled.indexOf(body.key);
+  if (!enabled && idx < 0) disabled.push(body.key);
+  if (enabled && idx >= 0) disabled.splice(idx, 1);
+  setSmsDisabledKeys(disabled);
+  return { ok: true, key: body.key, enabled };
+}
+
+function getAdminPendingSms() {
+  const now = Date.now();
+  const messages = [];
+  getJobs().forEach(job => {
+    if (['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(job.status)) return;
+    const pickupTime = new Date(job.pickup_time || new Date().toISOString()).getTime();
+    const base = {
+      id: job.id,
+      jobId: job.id,
+      recipientName: job.customer_name || 'Customer',
+      phone: job.customer_phone || '',
+      jobType: customerJobTypeKey('', job).replace(/^customer-|-/g, ' ') || 'Booking'
+    };
+    const add = (key, scheduledAt) => {
+      if (!key || !getSmsTemplate(key)) return;
+      const body = renderSmsBody(key, customerSmsData(job));
+      if (!body) return;
+      messages.push({
+        ...base,
+        key,
+        templateKey: key,
+        scheduledAt: new Date(scheduledAt).toISOString(),
+        body,
+        enabled: isSmsEnabled(key)
+      });
+    };
+    // Future booking customer reminders
+    if (pickupTime > now + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000) {
+      const oneWeek = pickupTime - 7 * 24 * 60 * 60 * 1000;
+      const oneDay = pickupTime - 1 * 24 * 60 * 60 * 1000;
+      if (oneWeek > now) add(customerJobTypeKey('one-week-reminder', job), oneWeek);
+      if (oneDay > now) add(customerJobTypeKey('24-hour-reminder', job), oneDay);
+    }
+    // Driver future-job offer is due when the booking enters the allocation window
+    if (job.status === 'SCHEDULED') {
+      const offerDue = pickupTime - FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
+      if (offerDue > now) {
+        const key = driverOfferKey(job);
+        if (getSmsTemplate(key)) {
+          const body = renderSmsBody(key, driverSmsData(job, { id: 'DRIVER', name: 'Driver', phone: '', vehicle_type: job.vehicle_type || 'car', last_lat: '', last_lng: '' }));
+          if (body) {
+            messages.push({
+              ...base,
+              key,
+              templateKey: key,
+              scheduledAt: new Date(offerDue).toISOString(),
+              body,
+              enabled: isSmsEnabled(key)
+            });
+          }
+        }
+      }
+    }
+  });
+  messages.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+  return messages;
+}
+
+function handleSecureDriverAction(body) {
+  const { jobId, driverId, action, token } = body || {};
+  if (!jobId || !driverId || !action || !token) throw new Error('Missing secure action parameters');
+  const expected = secureActionToken(jobId, driverId, action);
+  if (token !== expected) throw new Error('Invalid secure link');
+  if (action === 'accept') {
+    try { return acceptOffer(jobId, driverId); } catch (e) {
+      try { return acceptFutureOffer(jobId, driverId); } catch (e2) { throw e; }
+    }
+  }
+  if (action === 'decline') {
+    try { return declineOffer(jobId, driverId); } catch (e) {
+      try { return declineFutureOffer(jobId, driverId); } catch (e2) { throw e; }
+    }
+  }
+  throw new Error('Invalid action');
+}
+
 function squarePaymentsEnabled() {
   const properties = PropertiesService.getScriptProperties();
   return Boolean(properties.getProperty('SQUARE_ACCESS_TOKEN') && properties.getProperty('SQUARE_LOCATION_ID'));
@@ -363,6 +868,10 @@ function squareIdempotencyKey(jobId, sourceId) {
 }
 
 function createSquarePayment(job, sourceId) {
+  return createSquarePaymentForAmount(Number(job.booking_fee) || 0, sourceId, job.id, 'The Wirral Jobe booking fee for ' + job.id);
+}
+
+function createSquarePaymentForAmount(amount, sourceId, referenceId, note) {
   if (!sourceId) throw new Error('Card details are required');
   const properties = PropertiesService.getScriptProperties();
   const accessToken = properties.getProperty('SQUARE_ACCESS_TOKEN');
@@ -370,11 +879,11 @@ function createSquarePayment(job, sourceId) {
   if (!accessToken || !locationId) throw new Error('Square payments are not configured');
   const payload = {
     source_id: sourceId,
-    idempotency_key: squareIdempotencyKey(job.id, sourceId),
-    amount_money: { amount: Math.round(Number(job.booking_fee) * 100), currency: 'GBP' },
+    idempotency_key: squareIdempotencyKey(referenceId, sourceId),
+    amount_money: { amount: Math.round(amount * 100), currency: 'GBP' },
     location_id: locationId,
-    reference_id: job.id,
-    note: 'The Wirral Jobe booking fee for ' + job.id
+    reference_id: referenceId,
+    note: note || 'The Wirral Jobe booking fee'
   };
   const response = UrlFetchApp.fetch('https://connect.squareup.com/v2/payments', {
     method: 'post',
@@ -397,7 +906,9 @@ function customerRequestOtp(body) {
   const email = String(body.email || '').trim();
   if (!name || !phone || phone.length < 10) throw new Error('Please enter your name and mobile number');
   const result = createCustomerOtp(phone, name, email);
-  return { ok: true, otp: result.otp, expiresAt: result.expiresAt, note: 'In development the OTP is returned here. SMS will be used when messaging is enabled.' };
+  const sent = sendCustomerOtpSms(phone, result.otp);
+  if (!sent) throw new Error('We could not send the SMS. Please check your number and try again.');
+  return { ok: true, message: 'Check your phone for the verification code.' };
 }
 function customerRegister(body) {
   const name = String(body.name || '').trim();
@@ -408,16 +919,48 @@ function customerRegister(body) {
   if (!/^\d{6}$/.test(pin)) throw new Error('Choose a 6-digit PIN');
   verifyCustomerOtp(phone, String(body.otp || ''));
   if (findCustomerByPhone(phone)) throw new Error('An account already exists for this mobile number. Please log in.');
-  const customer = { id: 'CUS-' + shortUuid(), name, phone, email, pin_hash: hashPin(pin), created_at: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const customer = { id: 'CUS-' + shortUuid(), name, phone, pin_hash: hashPin(pin), created_at: now, status: '', updated_at: now, last_login_at: '' };
   getCustomersSheet().appendRow(CUSTOMER_HEADERS.map(h => customer[h]));
   cleanupCustomerOtps(phone);
   writeAudit('customer', customer.id, 'account_created', 'customer', customer.id, { phone });
   return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
 }
 function customerLogin(body) {
-  const customer = findCustomerByPhone(body.phone);
-  if (!customer || customer.pin_hash !== hashPin(body.pin || '')) throw new Error('Invalid mobile number or PIN');
-  return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
+  const phone = normalizePhone(body.phone || '');
+  const pin = String(body.pin || '');
+  const customer = findCustomerByPhone(phone);
+  if (!customer) throw new Error('Invalid mobile number or PIN');
+
+  const expectedHash = hashPin(pin);
+  const row = findRowIndex(getCustomersSheet(), row => row[0] === customer.id);
+  const sheet = getCustomersSheet();
+  const raw = row > 0 ? sheet.getRange(row, 1, 1, 8).getValues()[0] : [];
+
+  // First try the correct pin_hash column
+  if (String(customer.pin_hash || '') === expectedHash) {
+    return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
+  }
+
+  // Some rows were shifted during the old email/pin_hash mismatch
+  if (raw.length > 4) {
+    const shiftedHash = String(raw[4] || '');
+    if (/^[a-f0-9]{64}$/i.test(shiftedHash) && shiftedHash === expectedHash) {
+      // repair the row: pin_hash, created_at, status, updated_at, last_login_at
+      const corrected = [raw[0], raw[1], raw[2], shiftedHash, raw[5] || '', raw[6] || '', raw[7] || '', ''];
+      sheet.getRange(row, 1, 1, 8).setValues([corrected]);
+      return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
+    }
+  }
+
+  // Final fallback for old plain-text PINs
+  const stored = String(customer.pin_hash || '');
+  if (stored === pin) {
+    if (row > 0) sheet.getRange(row, CUSTOMER_HEADERS.indexOf('pin_hash') + 1).setValue(expectedHash);
+    return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
+  }
+
+  throw new Error('Invalid mobile number or PIN');
 }
 function customerLogout(body) {
   revokeCustomerToken(body.customerToken);
@@ -425,17 +968,111 @@ function customerLogout(body) {
 }
 function customerForgotPin(body) {
   const phone = normalizePhone(body.phone);
-  verifyCustomerOtp(phone, String(body.otp || ''));
   const customer = findCustomerByPhone(phone);
   if (!customer) throw new Error('No account found for this number');
-  const pin = String(body.pin || '');
-  if (!/^\d{6}$/.test(pin)) throw new Error('Choose a 6-digit PIN');
-  const row = findRowIndex(getCustomersSheet(), row => row[0] === customer.id);
-  getCustomersSheet().getRange(row, 5).setValue(hashPin(pin));
+  const pin = String(Math.floor(100000 + Math.random() * 900000));
   cleanupCustomerOtps(phone);
-  writeAudit('customer', customer.id, 'pin_reset', 'customer', customer.id, {});
-  return { ok: true, customerToken: customerSession(customer.id) };
+  const bodyText = 'Your new Wirral Jobe login PIN is ' + pin + '. You can now log in with this PIN.';
+  if (customerSmsEnabled()) {
+    try { sendTwilioSms(phone, bodyText); }
+    catch (e) { Logger.log('Failed to send PIN reset SMS: %s', e.message); throw new Error('We could not send the SMS. Please try again.'); }
+  } else {
+    throw new Error('SMS is not enabled. Please contact support.');
+  }
+  const row = findRowIndex(getCustomersSheet(), row => row[0] === customer.id);
+  if (row > 0) getCustomersSheet().getRange(row, CUSTOMER_HEADERS.indexOf('pin_hash') + 1).setValue(hashPin(pin));
+  writeAudit('customer', customer.id, 'pin_reset', 'customer', customer.id, { phone });
+  return { ok: true, message: 'A new PIN has been sent to your phone.' };
 }
+function customerRegisterPush(body) {
+  const { customerToken, fcmToken } = body || {};
+  if (!customerToken || !fcmToken) throw new Error('Missing token');
+  const customer = requireCustomer(customerToken);
+  const sheet = getCustomersSheet();
+  const row = findRowIndex(sheet, r => r[0] === customer.id);
+  if (row > 0) {
+    const col = CUSTOMER_HEADERS.indexOf('fcm_token') + 1;
+    sheet.getRange(row, col).setValue(fcmToken);
+  }
+  return { ok: true };
+}
+
+function driverRegisterPush(body) {
+  const { driverToken, fcmToken } = body || {};
+  if (!driverToken || !fcmToken) throw new Error('Missing token');
+  const session = getDriverSessions().find(s => s.token === driverToken);
+  if (!session) throw new Error('Invalid driver token');
+  const driverId = session.driverId || session.driver_id;
+  updateDriver(driverId, { fcm_token: fcmToken });
+  return { ok: true };
+}
+
+function getFcmAccessToken() {
+  const props = PropertiesService.getScriptProperties();
+  const email = props.getProperty('FCM_CLIENT_EMAIL');
+  const key = props.getProperty('FCM_PRIVATE_KEY');
+  const projectId = props.getProperty('FCM_PROJECT_ID');
+  if (!email || !key || !projectId) return null;
+  const now = Math.floor(Date.now() / 1000);
+  const header = Utilities.base64EncodeWebSafe(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claim = Utilities.base64EncodeWebSafe(JSON.stringify({
+    iss: email, sub: email,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now, exp: now + 3600,
+    scope: 'https://www.googleapis.com/auth/firebase.messaging'
+  }));
+  const signInput = header + '.' + claim;
+  const signature = Utilities.base64EncodeWebSafe(Utilities.computeRsaSha256Signature(signInput, key));
+  const jwt = signInput + '.' + signature;
+  const tokenRes = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method: 'post', contentType: 'application/x-www-form-urlencoded',
+    payload: 'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=' + jwt,
+    muteHttpExceptions: true
+  });
+  const tokenData = JSON.parse(tokenRes.getContentText() || '{}');
+  return tokenData.access_token || null;
+}
+
+function sendPushNotification(fcmToken, title, body, data) {
+  if (!fcmToken) return false;
+  const props = PropertiesService.getScriptProperties();
+  const projectId = props.getProperty('FCM_PROJECT_ID');
+  if (!projectId) return false;
+  const accessToken = getFcmAccessToken();
+  if (!accessToken) return false;
+  const message = {
+    token: fcmToken,
+    notification: { title, body },
+    data: data || {},
+    android: { priority: 'high', notification: { channel_id: 'job_offers', priority: 'max', default_vibrate_timings: true } }
+  };
+  try {
+    const res = UrlFetchApp.fetch('https://fcm.googleapis.com/v1/projects/' + projectId + '/messages:send', {
+      method: 'post', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + accessToken },
+      payload: JSON.stringify({ message }),
+      muteHttpExceptions: true
+    });
+    Logger.log('FCM send result: %s %s', res.getResponseCode(), res.getContentText().slice(0, 200));
+    return res.getResponseCode() < 300;
+  } catch (e) {
+    Logger.log('FCM send error: %s', e.message);
+    return false;
+  }
+}
+
+function sendPushToCustomer(customerId, title, body, data) {
+  const customer = getCustomers().find(c => c.id === customerId);
+  if (!customer || !customer.fcm_token) return false;
+  return sendPushNotification(customer.fcm_token, title, body, data);
+}
+
+function sendPushToDriver(driverId, title, body, data) {
+  const driver = findDriverById(driverId);
+  if (!driver || !driver.fcm_token) return false;
+  return sendPushNotification(driver.fcm_token, title, body, data);
+}
+
 function getCustomerMe(token) { return { customer: customerResponse(requireCustomer(token)) }; }
 function getCustomerJobs(token) {
   const customer = requireCustomer(token);
@@ -654,8 +1291,9 @@ function driverLogout(body, driverId, token) {
 function driverZone(d) {
   const lat = Number(d.last_lat);
   const lng = Number(d.last_lng);
-  if (lat && lng) return getZone(lat, lng) || d.zone || null;
-  return d.zone || null;
+  if (lat && lng) return getZone(lat, lng) || null;
+  if (isDriverLocationFresh(d)) return d.zone || null;
+  return null;
 }
 
 function getDriverMe(driverId) {
@@ -690,7 +1328,11 @@ function updateDriverLocation(body, driverId) {
   if (!d) throw new Error('Driver not found');
   const now = new Date().toISOString();
   const nowMs = Date.now();
-  updateDriver(driverId, { last_lat: lat, last_lng: lng, last_location_at: now, zone: getZone(lat, lng) });
+  const backendZone = getZone(lat, lng);
+  const frontendZone = (body || {}).zone;
+  const acceptedFrontendZone = !backendZone && frontendZone && isValidZoneId(frontendZone) ? frontendZone : '';
+  const storedZone = backendZone || acceptedFrontendZone || (isDriverLocationFresh(d) ? d.zone : '');
+  updateDriver(driverId, { last_lat: lat, last_lng: lng, last_location_at: now, zone: storedZone });
 
   // Update distance meter for any POB job
   getJobs().filter(job => job.driver_id === driverId && job.status === 'POB').forEach(job => {
@@ -708,6 +1350,30 @@ function updateDriverLocation(body, driverId) {
     n.meterLastLng = Number(lng);
     n.meterLastAt = now;
     updateJob(job.id, { notes: JSON.stringify(n), updated_at: now });
+  });
+
+  // Check ETA for ON_WAY jobs and send 5-min notification
+  getJobs().filter(job => job.driver_id === driverId && job.status === 'ON_WAY').forEach(job => {
+    const miles = distanceMiles(Number(lat), Number(lng), Number(job.pickup_lat), Number(job.pickup_lng));
+    const etaMins = Math.round(miles / 20 * 60);
+    if (etaMins <= 5 && etaMins >= 0) {
+      let n = {};
+      try { n = JSON.parse(job.notes || '{}'); } catch (e) {}
+      if (!n.fiveMinNotified) {
+        n.fiveMinNotified = true;
+        updateJob(job.id, { notes: JSON.stringify(n), updated_at: now });
+        if (job.customer_id) {
+          sendPushToCustomer(job.customer_id, 'Almost There!', 'Your driver is about ' + Math.max(1, etaMins) + ' minutes away.', { route: '/track/' + job.tracking_token });
+        }
+        if (job.customer_phone) {
+          try {
+            const smsBody = 'Your Wirral Jobe driver is about ' + Math.max(1, etaMins) + ' minutes away!';
+            if (customerSmsEnabled()) sendTwilioSms(job.customer_phone, smsBody);
+          } catch (e) { Logger.log('5-min SMS error: %s', e.message); }
+        }
+        Logger.log('5-min ETA notification sent for job %s (ETA: %s min)', job.id, etaMins);
+      }
+    }
   });
 
   Logger.log('updateDriverLocation: driver %s location updated, zone=%s', driverId, getZone(lat, lng));
@@ -857,22 +1523,25 @@ function createBooking(body) {
   if (!p.pickupAddress || !p.dropoffAddress || !customerName || !customerPhone) throw new Error('Missing required fields');
   if (![p.pickupLat, p.pickupLng, p.dropoffLat, p.dropoffLng].every(value => Number.isFinite(Number(value)))) throw new Error('Please select valid pickup and destination addresses');
   const miles = Number(p.miles || 0);
+  const pickupTime = new Date(p.pickupTime || new Date().toISOString());
+  const timeOfDay = getTimeOfDay(pickupTime.toISOString());
   const airportFare = calculateAirportFare(p);
-  const fare = airportFare != null ? airportFare : calculateFare({ miles, vehicleType: p.vehicleType || 'car', timeOfDay: p.timeOfDay || 'day' });
+  const fare = airportFare != null ? airportFare : calculateFare({ miles, vehicleType: p.vehicleType || 'car', timeOfDay });
   const bookingFee = 1.0;
   const jobId = 'WF-' + shortUuid();
   const token = Utilities.getUuid();
-
-  const pickupTime = new Date(p.pickupTime || new Date().toISOString());
   if (Number.isNaN(pickupTime.getTime()) || pickupTime.getTime() < Date.now() - 60000) throw new Error('Please choose a valid pickup time');
   const isAirport = airportFare != null;
   const isFutureBooking = isAirport || pickupTime.getTime() > Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
   const paymentRequired = squarePaymentsEnabled();
+  const bookingNotes = {
+    luggage: Number(p.luggage) || 0,
+    flightNumber: p.flightNumber || '',
+    childSeats: p.childSeats || '',
+    accessibility: p.accessibility || '',
+    customerNotes: p.customerNotes || ''
+  };
   Logger.log('createBooking: jobId=%s isFuture=%s paymentRequired=%s', jobId, isFutureBooking, paymentRequired);
-  if (!isFutureBooking && !paymentRequired) {
-    Logger.log('createBooking: starting offer immediately for job %s', jobId);
-    startOffer(jobId, p.pickupLat || 0, p.pickupLng || 0);
-  }
 
   appendJob({
     created_at: new Date().toISOString(),
@@ -899,8 +1568,14 @@ function createBooking(body) {
     tracking_token: token,
     customer_id: customer ? customer.id : '',
     passengers: Number(p.passengers) || 1,
+    notes: JSON.stringify(bookingNotes),
     updated_at: new Date().toISOString()
   });
+
+  if (!isFutureBooking && !paymentRequired) {
+    Logger.log('createBooking: starting offer immediately for job %s', jobId);
+    try { startOffer(jobId, Number(p.pickupLat) || 0, Number(p.pickupLng) || 0); } catch (e) { Logger.log('startOffer error (non-fatal): %s', e.message); }
+  }
 
   if (isFutureBooking) {
     Logger.log('createBooking: starting future offer cycle for job %s', jobId);
@@ -922,11 +1597,69 @@ function confirmBooking(body) {
     const payment = createSquarePayment(job, sourceId);
     updateJob(jobId, { payment_id: payment.id, payment_status: 'BOOKING_FEE_PAID', updated_at: new Date().toISOString() });
     writeAudit('customer', job.customer_id || job.customer_phone, 'booking_fee_paid', 'job', jobId, { provider: 'square', paymentId: payment.id, amount: Number(job.booking_fee) });
+    sendBookingConfirmedSms(job);
     allocateImmediateJob(jobId);
   } else {
-    updateJob(jobId, { payment_status: 'HELD', updated_at: new Date().toISOString() });
+    updateJob(jobId, { payment_status: 'BOOKING_FEE_PAID', updated_at: new Date().toISOString() });
+    allocateImmediateJob(jobId);
   }
   return { ok: true, jobId, fare: Number(job.fare), bookingFee: Number(job.booking_fee), trackingToken: job.tracking_token };
+}
+
+function deleteJobById(id) {
+  const sheet = getJobsSheet();
+  const values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][1]) === String(id)) {
+      sheet.deleteRow(i + 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+function createReturnPair(body) {
+  const { outbound, return: returnPayload } = body || {};
+  if (!outbound || !returnPayload) throw new Error('Missing outbound or return booking details');
+  const outboundResult = createBooking(outbound);
+  let returnResult;
+  try {
+    returnResult = createBooking(returnPayload);
+  } catch (err) {
+    Logger.log('createReturnPair: return failed, rolling back outbound job %s: %s', outboundResult.jobId, err.message);
+    deleteJobById(outboundResult.jobId);
+    throw new Error('Could not create return booking: ' + err.message);
+  }
+  return { ok: true, outbound: outboundResult, return: returnResult };
+}
+
+function confirmReturnPair(body) {
+  const { outboundJobId, returnJobId, sourceId } = body || {};
+  Logger.log('confirmReturnPair: outbound=%s return=%s', outboundJobId, returnJobId);
+  if (!outboundJobId || !returnJobId) throw new Error('Missing job IDs');
+  const outbound = findJobById(outboundJobId);
+  const ret = findJobById(returnJobId);
+  if (!outbound || !ret) throw new Error('Job not found');
+  if (outbound.payment_status === 'BOOKING_FEE_PAID' && ret.payment_status === 'BOOKING_FEE_PAID') {
+    return { ok: true, outboundJobId, returnJobId, fare: Number(outbound.fare) + Number(ret.fare), bookingFee: Number(outbound.booking_fee) + Number(ret.booking_fee) };
+  }
+  if (squarePaymentsEnabled()) {
+    const totalBookingFee = (Number(outbound.booking_fee) || 0) + (Number(ret.booking_fee) || 0);
+    const payment = createSquarePaymentForAmount(totalBookingFee, sourceId, outboundJobId + '-' + returnJobId, 'Booking fees for ' + outboundJobId + ' and ' + returnJobId);
+    const now = new Date().toISOString();
+    updateJob(outboundJobId, { payment_id: payment.id, payment_status: 'BOOKING_FEE_PAID', updated_at: now });
+    updateJob(returnJobId, { payment_id: payment.id, payment_status: 'BOOKING_FEE_PAID', updated_at: now });
+    writeAudit('customer', outbound.customer_id || outbound.customer_phone, 'booking_fee_paid', 'job', outboundJobId + ',' + returnJobId, { provider: 'square', paymentId: payment.id, amount: totalBookingFee });
+    sendBookingConfirmedSms(outbound);
+    sendBookingConfirmedSms(ret);
+    allocateImmediateJob(outboundJobId);
+    allocateImmediateJob(returnJobId);
+  } else {
+    const now = new Date().toISOString();
+    updateJob(outboundJobId, { payment_status: 'HELD', updated_at: now });
+    updateJob(returnJobId, { payment_status: 'HELD', updated_at: now });
+  }
+  return { ok: true, outboundJobId, returnJobId, fare: Number(outbound.fare) + Number(ret.fare), bookingFee: Number(outbound.booking_fee) + Number(ret.booking_fee) };
 }
 
 // ---------- Status ----------
@@ -944,6 +1677,8 @@ function setJobStatus(jobId, body, driverId) {
     updateJob(jobId, { status, cancelled_at: now });
     updateDriver(driverId, { status: 'AVAILABLE', available_since: now });
     writeAudit('driver', driverId, 'job_status_changed', 'job', jobId, { from: job.status, to: status });
+    if (status === 'NO_SHOW') sendCustomerNoShowSms(findJobById(jobId));
+    if (status === 'CUSTOMER_CANCELLED') sendCustomerCancelledSms(findJobById(jobId));
     return { ok: true, status };
   }
   const nextStatus = { ASSIGNED: 'ON_WAY', ON_WAY: 'ARRIVED', ARRIVED: 'POB', POB: 'COMPLETE' };
@@ -971,6 +1706,17 @@ function setJobStatus(jobId, body, driverId) {
   updateJob(jobId, updates);
   writeAudit('driver', driverId, 'job_status_changed', 'job', jobId, { from: job.status, to: status });
 
+  if (status === 'ON_WAY') {
+    const updatedJob = findJobById(jobId);
+    sendDriverAllocatedSms(updatedJob, findDriverById(driverId));
+    if (updatedJob.customer_id) sendPushToCustomer(updatedJob.customer_id, 'Driver On The Way', 'Your driver is heading to you now.', { route: '/track/' + updatedJob.tracking_token });
+  }
+  if (status === 'ARRIVED') {
+    const updatedJob = findJobById(jobId);
+    sendDriverArrivedSms(updatedJob);
+    if (updatedJob.customer_id) sendPushToCustomer(updatedJob.customer_id, 'Driver Arrived', 'Your driver has arrived at the pickup.', { route: '/track/' + updatedJob.tracking_token });
+  }
+
   if (status === 'COMPLETE') {
     const driver = findDriverById(driverId);
     const rate = Number(driver?.commission_rate) || 0;
@@ -981,6 +1727,9 @@ function setJobStatus(jobId, body, driverId) {
       settle_balance: (Number(driver?.settle_balance) || 0) + commission
     });
     updateJob(jobId, { commission_amount: commission });
+    const completedJob = findJobById(jobId);
+    sendJourneyCompletedSms(completedJob);
+    if (completedJob.customer_id) sendPushToCustomer(completedJob.customer_id, 'Journey Complete', 'Thanks for riding with Wirral Jobe!', {});
   }
   return { ok: true, status };
 }
@@ -1031,6 +1780,10 @@ function startOfferToDriver(jobId, pickupLat, pickupLng, driverId) {
   getOffersSheet().appendRow([jobId, driverId, offered, expiresAt, pickupLat, pickupLng]);
   SpreadsheetApp.flush();
   Logger.log('startOfferToDriver: offering job %s to driver %s', jobId, driverId);
+  const job = findJobById(jobId);
+  if (job) {
+    sendPushToDriver(driverId, 'New Job Offer!', job.pickup_address + ' → ' + job.dropoff_address + ' £' + Number(job.fare).toFixed(2), { route: '/driver', type: 'job_offer', jobId });
+  }
 }
 
 function offerRowIndex(jobId) {
@@ -1060,29 +1813,34 @@ function resolveBidWinner(jobId, pickupLat, pickupLng) {
 function advanceOffers() {
   const sheet = getOffersSheet();
   const offers = getOffers();
-  const now = Date.now();
+  const nowMs = Date.now();
   offers.forEach(offer => {
-    if (Number(offer.expiresAt) > now) return;
-    const idx = offerRowIndex(offer.jobId);
-    if (offer.currentDriverId === BIDDING_COUNTDOWN_DRIVER) {
-      const winnerId = resolveBidWinner(offer.jobId, Number(offer.pickupLat), Number(offer.pickupLng));
-      const now = new Date().toISOString();
-      if (winnerId) {
-        startOfferToDriver(offer.jobId, Number(offer.pickupLat), Number(offer.pickupLng), winnerId);
-        updateJob(offer.jobId, { status: 'OFFERED', updated_at: now });
-      } else {
-        updateJob(offer.jobId, { status: 'BIDDING', updated_at: now });
+    try {
+      if (Number(offer.expiresAt) > nowMs) return;
+      const idx = offerRowIndex(offer.jobId);
+      if (idx < 1) return;
+      if (offer.currentDriverId === BIDDING_COUNTDOWN_DRIVER) {
+        const winnerId = resolveBidWinner(offer.jobId, Number(offer.pickupLat), Number(offer.pickupLng));
+        const nowIso = new Date().toISOString();
+        if (winnerId) {
+          startOfferToDriver(offer.jobId, Number(offer.pickupLat), Number(offer.pickupLng), winnerId);
+          updateJob(offer.jobId, { status: 'OFFERED', updated_at: nowIso });
+        } else {
+          updateJob(offer.jobId, { status: 'BIDDING', updated_at: nowIso });
+        }
+        sheet.deleteRow(idx);
+        return;
       }
-      sheet.deleteRow(idx);
-      return;
-    }
-    const offered = JSON.parse(offer.offeredDrivers || '[]');
-    const next = findNextQueuedDriver(Number(offer.pickupLat), Number(offer.pickupLng), offered);
-    if (!next) {
-      sheet.deleteRow(idx);
-    } else {
-      offered.push(next.id);
-      sheet.getRange(idx, 2, 1, 4).setValues([[next.id, JSON.stringify(offered), Date.now() + 60000, offer.pickupLat]]);
+      const offered = JSON.parse(offer.offeredDrivers || '[]');
+      const next = findNextQueuedDriver(Number(offer.pickupLat), Number(offer.pickupLng), offered);
+      if (!next) {
+        sheet.deleteRow(idx);
+      } else {
+        offered.push(next.id);
+        sheet.getRange(idx, 2, 1, 4).setValues([[next.id, JSON.stringify(offered), Date.now() + 60000, offer.pickupLat]]);
+      }
+    } catch (e) {
+      Logger.log('advanceOffers error for job %s: %s', offer && offer.jobId, e.message || e);
     }
   });
   SpreadsheetApp.flush();
@@ -1337,6 +2095,8 @@ function advanceFutureOffer(jobId) {
     if (driver) {
       sheet.getRange(idx, 2, 1, 4).setValues([[driver.id, JSON.stringify(offer.offeredDrivers), Date.now() + 60000, offer.pickupLat]]);
       sheet.getRange(idx, 7, 1, 2).setValues([[letter, JSON.stringify(offer.offeredLetters)]]);
+      const offerJob = findJobById(jobId);
+      if (offerJob) sendDriverOfferSms(offerJob, driver);
       writeAudit('system', '', 'future_offered', 'job', jobId, { driverId: driver.id, letter });
       return;
     }
@@ -1612,3 +2372,4 @@ function getWaitingRate(vehicleType, date) {
 function shortUuid() {
   return Utilities.getUuid().replace(/-/g, '').substring(0, 8).toUpperCase();
 }
+

@@ -63,7 +63,7 @@ function findZone(lat, lng) {
   for (const f of FLIGHTPATH_ZONES.features) {
     if (_pointInGeometry(lng, lat, f.geometry)) matches.push(f);
   }
-  if (matches.length === 0) return null;
+  if (matches.length === 0) return findNearestZone(lat, lng);
   if (matches.length === 1) return matches[0];
 
   let best = matches[0];
@@ -81,7 +81,27 @@ function findZone(lat, lng) {
   return best;
 }
 
+function findNearestZone(lat, lng, maxMetres) {
+  maxMetres = maxMetres || 5000;
+  let best = null;
+  let bestDist = Infinity;
+  for (const f of FLIGHTPATH_ZONES.features) {
+    const props = f.properties;
+    if (props.external || props.zoneId === 'international') continue;
+    const lat2 = props.centerLat != null ? props.centerLat : props.labelLat;
+    const lng2 = props.centerLng != null ? props.centerLng : props.labelLng;
+    if (lat2 == null || lng2 == null) continue;
+    const d = _distanceMetres(lat, lng, lat2, lng2);
+    if (d < bestDist) { bestDist = d; best = f; }
+  }
+  return bestDist <= maxMetres ? best : null;
+}
+
 function getZoneName(zoneId) {
   const f = FLIGHTPATH_ZONES.features.find(z => z.properties.zoneId === zoneId);
   return f ? f.properties.zoneName : zoneId || 'Unknown';
+}
+
+function isValidZoneId(zoneId) {
+  return FLIGHTPATH_ZONES.features.some(z => z.properties.zoneId === zoneId);
 }

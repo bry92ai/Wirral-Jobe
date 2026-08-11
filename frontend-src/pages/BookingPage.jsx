@@ -523,9 +523,9 @@ export default function BookingPage() {
         customerToken,
         passengers,
         luggage,
-        flightNumber,
-        childSeats,
-        accessibility,
+        ...(isAirport && flightNumber ? { flightNumber } : {}),
+        ...(childSeats ? { childSeats } : {}),
+        ...(accessibility ? { accessibility } : {}),
         customerNotes
       };
       if (!returnTrip) {
@@ -543,6 +543,12 @@ export default function BookingPage() {
           returnPickup = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
           returnDropoff = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
         }
+        if (returnPickup.lat == null || returnPickup.lng == null || returnDropoff.lat == null || returnDropoff.lng == null) {
+          setError('Return trip locations are incomplete.');
+          setLoading(false);
+          return;
+        }
+        const returnMiles = distanceMiles(returnPickup.lat, returnPickup.lng, returnDropoff.lat, returnDropoff.lng);
         const returnBooking = {
           pickupAddress: returnPickup.address,
           dropoffAddress: returnDropoff.address,
@@ -550,16 +556,16 @@ export default function BookingPage() {
           pickupLng: returnPickup.lng,
           dropoffLat: returnDropoff.lat,
           dropoffLng: returnDropoff.lng,
-          miles: route.miles,
+          miles: returnMiles,
           vehicleType,
           timeOfDay: getTimeOfDay(returnDate),
           pickupTime: returnDate.toISOString(),
           customerToken,
           passengers,
           luggage,
-          flightNumber,
-          childSeats,
-          accessibility,
+          ...(isAirport && flightNumber ? { flightNumber } : {}),
+          ...(childSeats ? { childSeats } : {}),
+          ...(accessibility ? { accessibility } : {}),
           customerNotes
         };
         const pair = await api('booking/return-pair', { outbound: booking, return: returnBooking });
@@ -594,6 +600,11 @@ export default function BookingPage() {
       returnPickup = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
       returnDropoff = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
     }
+    if (returnPickup.lat == null || returnPickup.lng == null || returnDropoff.lat == null || returnDropoff.lng == null) {
+      setError('Return trip locations are incomplete.');
+      return;
+    }
+    const returnMiles = distanceMiles(returnPickup.lat, returnPickup.lng, returnDropoff.lat, returnDropoff.lng);
     const returnData = await api('booking', {
       pickupAddress: returnPickup.address,
       dropoffAddress: returnDropoff.address,
@@ -601,16 +612,16 @@ export default function BookingPage() {
       pickupLng: returnPickup.lng,
       dropoffLat: returnDropoff.lat,
       dropoffLng: returnDropoff.lng,
-      miles: route.miles,
+      miles: returnMiles,
       vehicleType,
       timeOfDay: getTimeOfDay(returnDate),
       pickupTime: returnDate.toISOString(),
       customerToken,
       passengers,
       luggage,
-      flightNumber,
-      childSeats,
-      accessibility,
+      ...(isAirport && flightNumber ? { flightNumber } : {}),
+      ...(childSeats ? { childSeats } : {}),
+      ...(accessibility ? { accessibility } : {}),
       customerNotes
     });
     if (returnData.error) throw new Error(returnData.error);
@@ -990,7 +1001,11 @@ export default function BookingPage() {
               {futureTag()}
             </div>
             {panelTitle('Payment')}
-            {result && <PaymentForm fare={result.fare} bookingFee={result.bookingFee} clientSecret={clientSecret} onConfirm={confirmPayment} loading={loading} error={error} />}
+            {result ? (
+              <PaymentForm fare={result.fare} bookingFee={result.bookingFee} clientSecret={clientSecret} onConfirm={confirmPayment} loading={loading} error={error} />
+            ) : (
+              <p className="error">No booking data. Please go back and try again.</p>
+            )}
           </div>
         );
 

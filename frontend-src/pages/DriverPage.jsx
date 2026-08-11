@@ -123,6 +123,9 @@ function DriverPageContent() {
 
   useEffect(() => { currentZoneIdRef.current = currentZoneId; }, [currentZoneId]);
 
+  const profileRef = useRef(profile);
+  useEffect(() => { profileRef.current = profile; }, [profile]);
+
   useEffect(() => {
     const storedId = localStorage.getItem('driverId');
     const storedToken = localStorage.getItem('driverToken');
@@ -575,6 +578,7 @@ function DriverPageContent() {
   useEffect(() => {
     if (!loggedIn || !navigator.geolocation) return;
     setLocationError('');
+    let mounted = true;
 
     function sendLocation(lat, lng, zone, accuracy) {
       api('driver/location', { lat, lng, zone, accuracy }, driverAuth())
@@ -586,6 +590,7 @@ function DriverPageContent() {
 
     function handlePosition(position) {
       const { latitude, longitude, accuracy, heading: h } = position.coords;
+      if (!mounted) return;
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
       const location = { lat: latitude, lng: longitude };
       setMyLocation(location);
@@ -593,6 +598,10 @@ function DriverPageContent() {
       setLocationError('');
       lastGpsReadingRef.current = Date.now();
       if (h != null && !Number.isNaN(h)) setHeading(h);
+      if (!Number.isFinite(accuracy) || accuracy > 200) {
+        setLocationError('GPS signal is weak. Move outside or wait for a better fix.');
+        return;
+      }
 
       const zoneFeature = findZone(latitude, longitude);
       const zoneId = zoneFeature ? zoneFeature.properties.zoneId : null;
@@ -660,7 +669,19 @@ function DriverPageContent() {
 
     refreshLocation();
     const interval = setInterval(refreshLocation, 10000);
-    return () => clearInterval(interval);
+    const fallbackTimeout = setTimeout(() => {
+      if (!mounted || currentZoneIdRef.current) return;
+      const profileZone = profileRef.current?.zone;
+      if (profileZone) {
+        setCurrentZoneId(profileZone);
+        currentZoneIdRef.current = profileZone;
+      }
+    }, 30000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+      clearTimeout(fallbackTimeout);
+    };
   }, [loggedIn, driverId]);
 
   if (!loggedIn) {
