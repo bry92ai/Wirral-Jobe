@@ -204,6 +204,15 @@ function toIsoLocal(date) {
 
 export default function BookingPage() {
   const navigate = useNavigate();
+
+  function logout() {
+    localStorage.removeItem('wirralCustomerToken');
+    setCustomerToken('');
+    setCustomerName('');
+    setSavedPlaces([]);
+    navigate('/customer', { replace: true });
+  }
+
   const [screen, setScreenState] = useState('home');
   const [isFuture, setIsFuture] = useState(false);
 
@@ -214,6 +223,12 @@ export default function BookingPage() {
 
   const [vehicleType, setVehicleType] = useState('car');
   const [passengers, setPassengers] = useState(1);
+  const [luggage, setLuggage] = useState(0);
+  const [flightNumber, setFlightNumber] = useState('');
+  const [childSeats, setChildSeats] = useState('');
+  const [accessibility, setAccessibility] = useState('');
+  const [customerNotes, setCustomerNotes] = useState('');
+  const [showExtras, setShowExtras] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerToken, setCustomerToken] = useState(() => localStorage.getItem('wirralCustomerToken') || '');
@@ -297,8 +312,9 @@ export default function BookingPage() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const oneWayCarFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'car' }) || calculateFare({ miles: route.miles, vehicleType: 'car', timeOfDay: getTimeOfDay(new Date()) })) || 0;
-  const oneWayMpvFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'mpv' }) || calculateFare({ miles: route.miles, vehicleType: 'mpv', timeOfDay: getTimeOfDay(new Date()) })) || 0;
+  const quoteTimeOfDay = getTimeOfDay(isFuture || isAirport ? new Date(pickupTime) : new Date());
+  const oneWayCarFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'car' }) || calculateFare({ miles: route.miles, vehicleType: 'car', timeOfDay: quoteTimeOfDay })) || 0;
+  const oneWayMpvFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'mpv' }) || calculateFare({ miles: route.miles, vehicleType: 'mpv', timeOfDay: quoteTimeOfDay })) || 0;
   const tripCount = isAirport && airportTripType === 'return' ? 2 : 1;
   const carFare = oneWayCarFare * tripCount;
   const mpvFare = oneWayMpvFare * tripCount;
@@ -306,7 +322,7 @@ export default function BookingPage() {
   useEffect(() => {
     if (!customerToken) { navigate('/customer', { replace: true }); return; }
     Promise.all([api('customer/me', { customerToken }), api('customer/places', { customerToken })])
-      .then(([me, places]) => { setCustomerName(me.customer.name); setCustomerPhone(me.customer.phone); setSavedPlaces(places.places || []); })
+      .then(([me, places]) => { setCustomerName(me.customer?.name || ''); setCustomerPhone(me.customer?.phone || ''); setSavedPlaces(places.places || []); })
       .catch(() => {
         localStorage.removeItem('wirralCustomerToken');
         setCustomerToken('');
@@ -482,8 +498,12 @@ export default function BookingPage() {
   }
 
   async function submitBooking() {
-    if (!customerName.trim() || !customerPhone.trim()) {
+    if (!String(customerName).trim() || !String(customerPhone).trim()) {
       setError('Please enter your name and mobile number.');
+      return;
+    }
+    if (!pickup.address || !dropoff.address || pickup.lat == null || dropoff.lat == null) {
+      setError('Please select a pickup and destination.');
       return;
     }
     setError('');
@@ -498,19 +518,66 @@ export default function BookingPage() {
         dropoffLng: dropoff.lng,
         miles: route.miles,
         vehicleType,
-        timeOfDay: getTimeOfDay(new Date()),
+        timeOfDay: quoteTimeOfDay,
         pickupTime: (isFuture || isAirport) && pickupTime ? new Date(pickupTime).toISOString() : new Date().toISOString(),
-        customerName: customerName.trim(),
-        customerPhone: formatPhone(customerPhone),
-        passengers
+        customerToken,
+        passengers,
+        luggage,
+        flightNumber,
+        childSeats,
+        accessibility,
+        customerNotes
       };
-      booking.customerToken = customerToken;
-      const outbound = await api('booking', booking);
-      if (outbound.error) throw new Error(outbound.error);
-      setResult(outbound);
-      setClientSecret(outbound.clientSecret || null);
-      setPaymentTarget('outbound');
-      navigateToScreen('payment');
+      if (!returnTrip) {
+        const outbound = await api('booking', booking);
+        if (outbound.error) throw new Error(outbound.error);
+        setResult(outbound);
+        setClientSecret(outbound.clientSecret || null);
+        setPaymentTarget('outbound');
+        navigateToScreen('payment');
+      } else {
+        const returnDate = new Date(returnTrip.time);
+        let returnPickup = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
+        let returnDropoff = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
+        if (returnTrip.direction === 'from') {
+          returnPickup = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
+          returnDropoff = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
+        }
+        const returnBooking = {
+          pickupAddress: returnPickup.address,
+          dropoffAddress: returnDropoff.address,
+          pickupLat: returnPickup.lat,
+          pickupLng: returnPickup.lng,
+          dropoffLat: returnDropoff.lat,
+          dropoffLng: returnDropoff.lng,
+          miles: route.miles,
+          vehicleType,
+          timeOfDay: getTimeOfDay(returnDate),
+          pickupTime: returnDate.toISOString(),
+          customerToken,
+          passengers,
+          luggage,
+          flightNumber,
+          childSeats,
+          accessibility,
+          customerNotes
+        };
+        const pair = await api('booking/return-pair', { outbound: booking, return: returnBooking });
+        if (pair.error) throw new Error(pair.error);
+        setResult({
+          jobId: pair.outbound.jobId,
+          outboundJobId: pair.outbound.jobId,
+          returnJobId: pair.return.jobId,
+          fare: (pair.outbound.fare || 0) + (pair.return.fare || 0),
+          bookingFee: (pair.outbound.bookingFee || 0) + (pair.return.bookingFee || 0),
+          clientSecret: pair.outbound.clientSecret || null,
+          trackingToken: pair.outbound.trackingToken
+        });
+        setReturnResult(pair.return);
+        setClientSecret(pair.outbound.clientSecret || null);
+        setPaymentTarget('pair');
+        navigateToScreen('payment');
+      }
     } catch (err) {
       setError(err.message || 'Booking failed. Please try again.');
     } finally {
@@ -538,10 +605,13 @@ export default function BookingPage() {
       vehicleType,
       timeOfDay: getTimeOfDay(returnDate),
       pickupTime: returnDate.toISOString(),
-      customerName: customerName.trim(),
-      customerPhone: formatPhone(customerPhone),
+      customerToken,
       passengers,
-      customerToken
+      luggage,
+      flightNumber,
+      childSeats,
+      accessibility,
+      customerNotes
     });
     if (returnData.error) throw new Error(returnData.error);
     setReturnResult(returnData);
@@ -554,14 +624,15 @@ export default function BookingPage() {
     if (!result) return;
     setError(''); setLoading(true);
     try {
-      const confirm = await api('booking/confirm', { jobId: result.jobId, sourceId });
-      if (confirm.error) throw new Error(confirm.error);
-
-      if (paymentTarget === 'outbound' && returnTrip) {
-        await createReturnBooking();
-        setLoading(false);
+      if (paymentTarget === 'pair' && returnResult) {
+        const confirm = await api('booking/confirm-pair', { outboundJobId: result.outboundJobId, returnJobId: returnResult.jobId, sourceId });
+        if (confirm.error) throw new Error(confirm.error);
+        navigateToScreen('success');
         return;
       }
+
+      const confirm = await api('booking/confirm', { jobId: result.jobId, sourceId });
+      if (confirm.error) throw new Error(confirm.error);
       navigateToScreen('success');
     } catch (err) {
       setError(err.message || 'Payment failed. Please try again.');
@@ -858,11 +929,11 @@ export default function BookingPage() {
             <p className="wj-details-subtitle">Just a few details to confirm your booking.</p>
             <div className="wj-details-input">
               <span aria-hidden="true">♟</span>
-              <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Your name" />
+              <input type="text" value={customerName} disabled placeholder="Your name" />
             </div>
             <div className="wj-details-input">
               <span aria-hidden="true">●</span>
-              <input type="tel" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="Mobile number" />
+              <input type="tel" value={customerPhone} disabled placeholder="Mobile number" />
             </div>
             <div className="wj-passenger-label">Passengers</div>
             <div className="wj-passenger-picker">
@@ -870,6 +941,34 @@ export default function BookingPage() {
               <div><strong>{passengers}</strong><small>Up to {vehicleType === 'mpv' ? 8 : 4} passengers</small></div>
               <button type="button" aria-label="Add passenger" onClick={() => setPassengers(Math.min(vehicleType === 'mpv' ? 8 : 4, passengers + 1))}>+</button>
             </div>
+            {isAirport && (<>
+            <div className="wj-passenger-label">Luggage</div>
+            <div className="wj-passenger-picker">
+              <button type="button" aria-label="Remove luggage" onClick={() => setLuggage(Math.max(0, luggage - 1))}>−</button>
+              <div><strong>{luggage}</strong><small>Number of bags</small></div>
+              <button type="button" aria-label="Add luggage" onClick={() => setLuggage(luggage + 1)}>+</button>
+            </div>
+            <div className="wj-details-input">
+              <span aria-hidden="true">✈</span>
+              <input type="text" value={flightNumber} onChange={e => setFlightNumber(e.target.value)} placeholder="Flight number (if any)" />
+            </div>
+            </>)}
+            {!showExtras ? (
+              <button type="button" onClick={() => setShowExtras(true)} className="wj-text-button">+ Add child seat or accessibility needs</button>
+            ) : (
+              <>
+                <div className="wj-details-input">
+                  <span aria-hidden="true">♥</span>
+                  <input type="text" value={childSeats} onChange={e => setChildSeats(e.target.value)} placeholder="Child seats required?" />
+                </div>
+                <div className="wj-details-input">
+                  <span aria-hidden="true">♿</span>
+                  <input type="text" value={accessibility} onChange={e => setAccessibility(e.target.value)} placeholder="Accessibility needs" />
+                </div>
+                <button type="button" onClick={() => { setShowExtras(false); setChildSeats(''); setAccessibility(''); }} className="wj-text-button">− Remove special requirements</button>
+              </>
+            )}
+            <textarea className="wj-details-input" style={{ minHeight: 80, paddingTop: 12 }} value={customerNotes} onChange={e => setCustomerNotes(e.target.value)} placeholder="Any other notes for the driver" />
             {isFuture && (
               <input className="wj-details-datetime" type="datetime-local" value={pickupTime} min={toIsoLocal(new Date())} onChange={e => setPickupTime(e.target.value)} />
             )}
@@ -972,6 +1071,12 @@ export default function BookingPage() {
   return (
     <div className="wj-shell">
       <div className={`wj-frame wj-booking-frame wj-screen-${screen}`}>
+        {customerToken && (
+          <div className="wj-booking-userbar">
+            <span>Hi, <strong>{customerName || 'guest'}</strong></span>
+            <button type="button" className="wj-text-button" onClick={logout}>Log out</button>
+          </div>
+        )}
         {renderScreen()}
       </div>
     </div>

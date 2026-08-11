@@ -1,4 +1,5 @@
 import FLIGHTPATH_ZONES_DATA from '../data/flightpathZones.js';
+import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 
 export const FLIGHTPATH_ZONES = FLIGHTPATH_ZONES_DATA;
 
@@ -22,7 +23,6 @@ export function getZoneName(zoneId) {
   return f ? f.properties.zoneName : zoneId || 'Unknown';
 }
 
-// Haversine distance in metres between two WGS84 points.
 function distanceMetres(lat1, lng1, lat2, lng2) {
   const R = 6371000;
   const toRad = d => d * Math.PI / 180;
@@ -32,69 +32,50 @@ function distanceMetres(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function pointInRing(lng, lat, ring) {
-  let inside = false;
-  const n = ring.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const [xi, yi] = ring[i];
-    const [xj, yj] = ring[j];
-    const onSegment = (lat - yi) * (xj - xi) === (lng - xi) * (yj - yi) &&
-      Math.min(xi, xj) <= lng && lng <= Math.max(xi, xj) &&
-      Math.min(yi, yj) <= lat && lat <= Math.max(yi, yj);
-    if (onSegment) return 'boundary';
-    const intersect = ((yi > lat) !== (yj > lat)) &&
-      (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-function pointInPolygonGeometry(lng, lat, geometry) {
-  const type = geometry.type;
-  if (type === 'Polygon') {
-    const outer = pointInRing(lng, lat, geometry.coordinates[0]);
-    if (outer === true) {
-      for (let i = 1; i < geometry.coordinates.length; i++) {
-        if (pointInRing(lng, lat, geometry.coordinates[i])) return false;
-      }
-      return true;
-    }
-    return false;
-  }
-  if (type === 'MultiPolygon') {
-    for (const polygon of geometry.coordinates) {
-      const outer = pointInRing(lng, lat, polygon[0]);
-      if (outer !== true) continue;
-      let inHole = false;
-      for (let i = 1; i < polygon.length; i++) {
-        if (pointInRing(lng, lat, polygon[i])) { inHole = true; break; }
-      }
-      if (!inHole) return true;
-    }
-    return false;
-  }
-  return false;
-}
-
 export function findZone(lat, lng, collection = FLIGHTPATH_ZONES) {
   if (lat == null || lng == null) return null;
-  const matches = collection.features.filter(f => pointInPolygonGeometry(lng, lat, f.geometry));
-  if (matches.length === 0) return null;
-  if (matches.length === 1) return matches[0];
+  const matches = collection.features.filter(f => {
+    try { return booleanPointInPolygon([lng, lat], f); } catch { return false; }
+  });
+  if (matches.length === 0) return findNearestZone(lat, lng, collection);
 
-  let best = matches[0];
+  const internal = matches.filter(f => !f.properties.external && f.properties.zoneId !== 'international');
+  const candidates = internal.length ? internal : matches;
+
+  return pickBestZone(candidates, lat, lng);
+}
+
+function pickBestZone(features, lat, lng) {
+  let best = features[0];
   let bestDist = Infinity;
-  for (const f of matches) {
+  for (const f of features) {
     const props = f.properties;
     const d = distanceMetres(lat, lng, props.labelLat, props.labelLng);
     if (d < bestDist - 0.001) {
       bestDist = d;
       best = f;
-    } else if (Math.abs(d - bestDist) < 0.001) {
-      if (props.displayOrder < best.properties.displayOrder) best = f;
+    } else if (Math.abs(d - bestDist) < 0.001 && props.displayOrder < best.properties.displayOrder) {
+      best = f;
     }
   }
   return best;
+}
+
+function findNearestZone(lat, lng, collection = FLIGHTPATH_ZONES, maxMetres = 5000) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const f of collection.features) {
+    const props = f.properties;
+    if (props.zoneId === 'international') continue;
+    const lat2 = props.centerLat != null ? props.centerLat : props.labelLat;
+    const lng2 = props.centerLng != null ? props.centerLng : props.labelLng;
+    if (lat2 == null || lng2 == null) continue;
+    const d = distanceMetres(lat, lng, lat2, lng2);
+    if (d < bestDist) { bestDist = d; best = f; }
+  }
+  if (bestDist <= maxMetres) return best;
+  const intl = collection.features.find(f => f.properties.zoneId === 'international');
+  return intl || null;
 }
 
 export const findWirralZone = findZone;

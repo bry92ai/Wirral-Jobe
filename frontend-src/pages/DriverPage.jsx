@@ -4,6 +4,7 @@ import { api, apiGet } from '../lib/api.js';
 import { FLIGHTPATH_ZONES, findZone, getZoneName } from '../lib/zones.js';
 import { distanceMiles } from '../lib/geo.js';
 import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg, coinIcon } from '../lib/leaflet.js';
+import { startDriverService, stopDriverService } from '../lib/driverService.js';
 import logo from '../assets/logo.jpg';
 
 function playOfferSound() {
@@ -181,11 +182,13 @@ function DriverPageContent() {
 
   const queueInfo = useMemo(() => {
     const zoneId = currentZoneId || profile?.zone || null;
-    const zoneName = zoneId ? getZoneName(zoneId) : 'Outside Wirral';
-    const queue = [profile, ...otherDrivers]
-      .filter(Boolean)
+    const zoneName = zoneId ? getZoneName(zoneId) : 'Locating...';
+    const allDrivers = [profile, ...otherDrivers].filter(Boolean);
+    const seen = new Set();
+    const unique = allDrivers.filter(d => { if (seen.has(d.id)) return false; seen.add(d.id); return true; });
+    const queue = zoneId ? unique
       .filter(d => d.status === 'AVAILABLE' && driverZone(d) === zoneId)
-      .sort((a, b) => String(a.availableSince || '9999').localeCompare(String(b.availableSince || '9999')));
+      .sort((a, b) => String(a.availableSince || '9999').localeCompare(String(b.availableSince || '9999'))) : [];
     const position = queue.findIndex(d => d.id === driverId);
     return { zoneId, zoneName, queue, position: position >= 0 ? position + 1 : null };
   }, [currentZoneId, profile, otherDrivers, driverId]);
@@ -193,8 +196,10 @@ function DriverPageContent() {
   const zonePanelInfo = useMemo(() => {
     if (!selectedZoneId) return null;
     const zoneName = getZoneName(selectedZoneId);
-    const queue = [profile, ...otherDrivers]
-      .filter(Boolean)
+    const allDrivers = [profile, ...otherDrivers].filter(Boolean);
+    const seen = new Set();
+    const unique = allDrivers.filter(d => { if (seen.has(d.id)) return false; seen.add(d.id); return true; });
+    const queue = unique
       .filter(d => d.status === 'AVAILABLE' && driverZone(d) === selectedZoneId)
       .sort((a, b) => String(a.availableSince || '9999').localeCompare(String(b.availableSince || '9999')));
     const inZone = (job) => {
@@ -242,6 +247,11 @@ function DriverPageContent() {
     setError('');
     try {
       await api('driver/availability', { status }, driverAuth());
+      if (status === 'AVAILABLE') {
+        startDriverService();
+      } else {
+        stopDriverService();
+      }
       await loadProfile();
     } catch (err) {
       setError(err.message);
@@ -590,6 +600,13 @@ function DriverPageContent() {
 
       const pending = pendingZoneRef.current;
       if (zoneId !== previousZoneId) {
+        if (!previousZoneId && zoneId) {
+          setCurrentZoneId(zoneId);
+          currentZoneIdRef.current = zoneId;
+          sendLocation(latitude, longitude, zoneId, accuracy);
+          pendingZoneRef.current = null;
+          return;
+        }
         if (!pending || pending.zoneId !== zoneId) {
           pendingZoneRef.current = { zoneId, since: Date.now(), readings: 1 };
         } else {
@@ -663,9 +680,6 @@ function DriverPageContent() {
             </div>
             <button type="submit" disabled={loading} className="btn btn-primary">{loading ? 'Logging in…' : 'Log in'}</button>
             {error && <p className="error">{error}</p>}
-            <p style={{ fontSize: '0.78rem', color: 'var(--muted)', textAlign: 'center', marginTop: '1.1rem' }}>
-              Demo: DRV-001 / 1234 or DRV-002 / 5678
-            </p>
             <Link to="/driver/apply" className="wj-portal-back">New driver? Start your application</Link>
           </form>
         </div>
