@@ -1,5 +1,9 @@
 {
   "appId": "com.wirraljobe.app",
   "appName": "WirralJobe",
-  "webDir": "dist"
+  "webDir": "dist",
+  "server": {
+    "url": "https://wirraljobe.com/",
+    "cleartext": false
+  }
 }
