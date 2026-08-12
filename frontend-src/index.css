@@ -489,6 +489,7 @@ select option { background: var(--surface); color: var(--cream); }
 .wj-details-safety small { margin-top: 0.2rem; color: #bdb294; font-size: 0.78rem; line-height: 1.4; }
 .wj-details-submit { display: flex; align-items: center; justify-content: center; gap: 0.7rem; margin-top: 1.75rem; padding: 1rem; border-radius: 9px; background: var(--gold); color: #080704; font-family: var(--font-display); font-size: 1.4rem; text-transform: uppercase; }
 .wj-details-submit b { font-family: var(--font-body); font-size: 2rem; font-weight: 400; line-height: 0; }
+.wj-details-submit.wj-outline { background: transparent; border: 2px solid var(--gold); color: var(--gold); }
 .wj-details-footer { margin-top: 1.1rem; color: #bdb294; font-size: 0.66rem; font-weight: 700; text-align: center; text-transform: uppercase; }
 
 .wj-bids-screen { color: var(--cream); }

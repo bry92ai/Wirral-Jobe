@@ -226,14 +226,16 @@ export default function PaymentForm({
           {showBrowserOption && (
             <>
               <div style={{ textAlign: 'center', color: 'var(--cream-dim)', fontSize: '0.85rem', margin: '0.75rem 0' }}>or</div>
+              <p style={{ color: 'var(--cream-dim)', fontSize: '0.85rem', textAlign: 'center', margin: '0 0 0.5rem' }}>
+                If Google Pay / Apple Pay buttons don’t appear above, use your browser’s saved cards or wallets here.
+              </p>
               <button
                 type="button"
-                className="wj-text-button"
+                className="wj-details-submit wj-outline"
                 onClick={openBrowserPayment}
                 disabled={browserOpen || loading || payLoading}
-                style={{ display: 'block', margin: '0 auto' }}
               >
-                {browserOpen ? 'Waiting for browser payment…' : 'Pay with saved card / Google Pay / Apple Pay'}
+                {browserOpen ? 'Waiting for browser payment…' : 'Pay with card / Google Pay / Apple Pay in browser'} <b>›</b>
               </button>
             </>
           )}
