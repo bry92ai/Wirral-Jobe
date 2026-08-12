@@ -4,7 +4,7 @@
   functions = "netlify/functions"
 
 [build.environment]
-  GAS_URL = "https://script.google.com/macros/s/AKfycbxvLNKWnAN-c3lzUcm4r7quHEPJc-PlTWZsldcG_QBSq9Doqowoq_wZ0NO9UtYkECbH"
+  GAS_URL = "https://script.google.com/macros/s/AKfycbyUBA9zDFkyKPQYYKtGjRgb_2YuYwvtkMDUDNZ1rpOvLDPfR108ncmO8_3QRG6y-yvc"
 
 [[redirects]]
   from = "/api/*"

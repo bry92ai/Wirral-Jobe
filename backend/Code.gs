@@ -45,7 +45,7 @@ const JOB_HEADERS = ['created_at','id','status','driver_id','customer_name','cus
 const DRIVER_HEADERS = ['id','name','phone','pin','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','status','zone','last_lat','last_lng','last_location_at','commission_rate','settle_balance','available_since','created_at','updated_at','pin_hash','fcm_token'];
 const OFFER_HEADERS = ['jobId','currentDriverId','offeredDrivers','expiresAt','pickupLat','pickupLng'];
 const BID_HEADERS = ['created_at','job_id','driver_id','amount','status'];
-const CUSTOMER_HEADERS = ['id','name','phone','pin_hash','created_at','status','updated_at','last_login_at','fcm_token'];
+const CUSTOMER_HEADERS = ['id','name','phone','email','pin_hash','created_at','status','updated_at','last_login_at','fcm_token'];
 const PLACE_HEADERS = ['id','customer_id','label','address','lat','lng','type','created_at'];
 const DRIVER_APPLICATION_HEADERS = ['id','status','badge_url','badge_public_id','continuation_token','name','phone','pin_hash','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','created_at','submitted_at','reviewed_at','reviewed_by','rejection_reason','driver_id'];
 
@@ -500,7 +500,87 @@ function ensureDrivers() {
 
 // ---------- Customers ----------
 
-function getCustomersSheet() { return ensureSheet('Customers', CUSTOMER_HEADERS); }
+function getCustomersSheet() {
+  const sheet = ensureSheet('Customers', CUSTOMER_HEADERS);
+  maybeMigrateCustomersSheet();
+  return sheet;
+}
+
+function maybeMigrateCustomersSheet() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('customersMigratedV2') === 'true') return;
+  try {
+    migrateCustomersSheet();
+    props.setProperty('customersMigratedV2', 'true');
+  } catch (e) {
+    Logger.log('Customer sheet migration failed: %s', e.message || e);
+  }
+}
+
+function migrateCustomersSheet() {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName('Customers');
+  if (!sheet) return;
+  const target = CUSTOMER_HEADERS;
+  const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  if (currentHeaders.length === target.length && currentHeaders.every((h, i) => h === target[i])) return;
+
+  const values = sheet.getDataRange().getValues();
+  const rows = [];
+  for (let i = 1; i < values.length; i++) {
+    const r = values[i];
+    const id = String(r[0] || '');
+    if (!id) continue;
+    const name = String(r[1] || '');
+    const phone = String(r[2] || '');
+    const colD = String(r[3] || '');
+    const colE = String(r[4] || '');
+
+    let email = '';
+    let pinHash = '';
+    let createdAt = '';
+    let status = '';
+    let updatedAt = '';
+    let lastLoginAt = '';
+    let fcmToken = '';
+
+    if (/^[a-f0-9]{64}$/i.test(colD)) {
+      // Current schema: no email column, pin_hash is in col D
+      pinHash = colD;
+      createdAt = String(r[4] || '');
+      status = String(r[5] || '');
+      updatedAt = String(r[6] || '');
+      lastLoginAt = String(r[7] || '');
+      fcmToken = String(r[8] || '');
+    } else if (/^[a-f0-9]{64}$/i.test(colE)) {
+      // Old schema with email in col D and pin_hash in col E
+      email = colD;
+      pinHash = colE;
+      createdAt = String(r[5] || '');
+      status = String(r[6] || '');
+      updatedAt = String(r[7] || '');
+      lastLoginAt = String(r[8] || '');
+      fcmToken = String(r[9] || '');
+    } else {
+      // Unrecognised row - preserve col D as email and col E as pin_hash if it looks like a hash, otherwise empty
+      email = colD;
+      pinHash = /^[a-f0-9]{64}$/i.test(colE) ? colE : '';
+      createdAt = String(r[5] || '');
+      status = String(r[6] || '');
+      updatedAt = String(r[7] || '');
+      lastLoginAt = String(r[8] || '');
+      fcmToken = String(r[9] || '');
+    }
+
+    rows.push([id, name, phone, email, pinHash, createdAt, status, updatedAt, lastLoginAt, fcmToken]);
+  }
+
+  sheet.clear();
+  sheet.getRange(1, 1, 1, target.length).setValues([target]);
+  if (rows.length) sheet.getRange(2, 1, rows.length, target.length).setValues(rows);
+  SpreadsheetApp.flush();
+  Logger.log('Migrated Customers sheet to %s columns, %s rows', target.length, rows.length);
+}
 function getPlacesSheet() { return ensureSheet('Saved Places', PLACE_HEADERS); }
 function normalizePhone(phone) {
   let raw = String(phone || '').replace(/[\s().-]/g, '');
@@ -920,7 +1000,7 @@ function customerRegister(body) {
   verifyCustomerOtp(phone, String(body.otp || ''));
   if (findCustomerByPhone(phone)) throw new Error('An account already exists for this mobile number. Please log in.');
   const now = new Date().toISOString();
-  const customer = { id: 'CUS-' + shortUuid(), name, phone, pin_hash: hashPin(pin), created_at: now, status: '', updated_at: now, last_login_at: '' };
+  const customer = { id: 'CUS-' + shortUuid(), name, phone, email: email || '', pin_hash: hashPin(pin), created_at: now, status: '', updated_at: now, last_login_at: '', fcm_token: '' };
   getCustomersSheet().appendRow(CUSTOMER_HEADERS.map(h => customer[h]));
   cleanupCustomerOtps(phone);
   writeAudit('customer', customer.id, 'account_created', 'customer', customer.id, { phone });
@@ -929,37 +1009,27 @@ function customerRegister(body) {
 function customerLogin(body) {
   const phone = normalizePhone(body.phone || '');
   const pin = String(body.pin || '');
+  if (!pin) throw new Error('Please enter your PIN');
   const customer = findCustomerByPhone(phone);
   if (!customer) throw new Error('Invalid mobile number or PIN');
 
   const expectedHash = hashPin(pin);
-  const row = findRowIndex(getCustomersSheet(), row => row[0] === customer.id);
-  const sheet = getCustomersSheet();
-  const raw = row > 0 ? sheet.getRange(row, 1, 1, 8).getValues()[0] : [];
 
-  // First try the correct pin_hash column
-  if (String(customer.pin_hash || '') === expectedHash) {
-    return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
-  }
-
-  // Some rows were shifted during the old email/pin_hash mismatch
-  if (raw.length > 4) {
-    const shiftedHash = String(raw[4] || '');
-    if (/^[a-f0-9]{64}$/i.test(shiftedHash) && shiftedHash === expectedHash) {
-      // repair the row: pin_hash, created_at, status, updated_at, last_login_at
-      const corrected = [raw[0], raw[1], raw[2], shiftedHash, raw[5] || '', raw[6] || '', raw[7] || '', ''];
-      sheet.getRange(row, 1, 1, 8).setValues([corrected]);
-      return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
+  // The migration in getCustomersSheet should keep rows aligned, but this
+  // still tolerates legacy rows where the PIN hash ended up in the email column.
+  let storedHash = String(customer.pin_hash || '');
+  if (!/^[a-f0-9]{64}$/i.test(storedHash)) {
+    const row = findRowIndex(getCustomersSheet(), row => row[0] === customer.id);
+    const raw = row > 0 ? getCustomersSheet().getRange(row, 1, 1, CUSTOMER_HEADERS.length).getValues()[0] : [];
+    if (raw.length > 4) {
+      const shifted = String(raw[4] || '');
+      if (/^[a-f0-9]{64}$/i.test(shifted)) storedHash = shifted;
     }
   }
 
-  // Final fallback for old plain-text PINs
-  const stored = String(customer.pin_hash || '');
-  if (stored === pin) {
-    if (row > 0) sheet.getRange(row, CUSTOMER_HEADERS.indexOf('pin_hash') + 1).setValue(expectedHash);
+  if (storedHash === expectedHash) {
     return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
   }
-
   throw new Error('Invalid mobile number or PIN');
 }
 function customerLogout(body) {
