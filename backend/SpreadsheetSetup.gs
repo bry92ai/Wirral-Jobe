@@ -2,7 +2,7 @@ const WJ_SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('S
 
 const WJ_SCHEMAS = {
   Settings: ['key', 'value', 'updated_at'],
-  Customers: ['id', 'name', 'phone', 'pin_hash', 'created_at', 'status', 'updated_at', 'last_login_at'],
+  Customers: ['id', 'name', 'phone', 'email', 'pin_hash', 'created_at', 'status', 'updated_at', 'last_login_at', 'fcm_token'],
   'Saved Places': ['id', 'customer_id', 'label', 'address', 'lat', 'lng', 'type', 'created_at', 'updated_at'],
   Jobs: ['created_at', 'id', 'status', 'driver_id', 'customer_name', 'customer_phone', 'pickup_address', 'dropoff_address', 'pickup_lat', 'pickup_lng', 'dropoff_lat', 'dropoff_lng', 'pickup_time', 'vehicle_type', 'miles', 'fare', 'booking_fee', 'payment_id', 'payment_status', 'commission_rate', 'commission_amount', 'tracking_token', 'on_way_at', 'arrived_at', 'pob_at', 'completed_at', 'customer_id', 'passengers', 'notes', 'return_job_id', 'cancelled_at', 'updated_at'],
   Drivers: ['id', 'name', 'phone', 'pin', 'vehicle_type', 'license_type', 'vehicle_make_model_colour', 'reg_last_3', 'expiry_date', 'badge_number', 'status', 'zone', 'last_lat', 'last_lng', 'last_location_at', 'commission_rate', 'settle_balance', 'available_since', 'created_at', 'updated_at', 'pin_hash'],

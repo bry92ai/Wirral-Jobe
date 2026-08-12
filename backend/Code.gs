@@ -1671,6 +1671,7 @@ function confirmBooking(body) {
     allocateImmediateJob(jobId);
   } else {
     updateJob(jobId, { payment_status: 'BOOKING_FEE_PAID', updated_at: new Date().toISOString() });
+    sendBookingConfirmedSms(job);
     allocateImmediateJob(jobId);
   }
   return { ok: true, jobId, fare: Number(job.fare), bookingFee: Number(job.booking_fee), trackingToken: job.tracking_token };
@@ -1726,8 +1727,12 @@ function confirmReturnPair(body) {
     allocateImmediateJob(returnJobId);
   } else {
     const now = new Date().toISOString();
-    updateJob(outboundJobId, { payment_status: 'HELD', updated_at: now });
-    updateJob(returnJobId, { payment_status: 'HELD', updated_at: now });
+    updateJob(outboundJobId, { payment_status: 'BOOKING_FEE_PAID', updated_at: now });
+    updateJob(returnJobId, { payment_status: 'BOOKING_FEE_PAID', updated_at: now });
+    sendBookingConfirmedSms(outbound);
+    sendBookingConfirmedSms(ret);
+    allocateImmediateJob(outboundJobId);
+    allocateImmediateJob(returnJobId);
   }
   return { ok: true, outboundJobId, returnJobId, fare: Number(outbound.fare) + Number(ret.fare), bookingFee: Number(outbound.booking_fee) + Number(ret.booking_fee) };
 }
