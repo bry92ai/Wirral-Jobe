@@ -297,6 +297,8 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'customer/login') return customerLogin(body);
   if (r === 'customer/logout') return customerLogout(body);
   if (r === 'customer/forgot-pin') return customerForgotPin(body);
+  if (r === 'customer/forgot-pin-otp') return customerRequestPinResetOtp(body);
+  if (r === 'customer/reset-pin') return customerResetPin(body);
   if (r === 'customer/me') return getCustomerMe(body.customerToken);
   if (r === 'customer/jobs') return getCustomerJobs(body.customerToken);
   if (r === 'customer/places') return getCustomerPlaces(body.customerToken);
@@ -1054,6 +1056,34 @@ function customerForgotPin(body) {
   writeAudit('customer', customer.id, 'pin_reset', 'customer', customer.id, { phone });
   return { ok: true, message: 'A new PIN has been sent to your phone.' };
 }
+function customerRequestPinResetOtp(body) {
+  const phone = normalizePhone(body.phone);
+  const customer = findCustomerByPhone(phone);
+  if (!customer) throw new Error('No account found for this number');
+  const result = createCustomerOtp(phone, customer.name, customer.email || '');
+  const sent = sendCustomerOtpSms(phone, result.otp);
+  if (!sent) throw new Error('We could not send the SMS. Please check your number and try again.');
+  return { ok: true, message: 'Check your phone for the verification code.' };
+}
+
+function customerResetPin(body) {
+  const phone = normalizePhone(body.phone);
+  const pin = String(body.pin || '');
+  const confirmPin = String(body.confirmPin || '');
+  if (pin !== confirmPin) throw new Error('PINs do not match');
+  if (!/^\d{6}$/.test(pin)) throw new Error('Choose a 6-digit PIN');
+
+  verifyCustomerOtp(phone, String(body.otp || ''));
+  const customer = findCustomerByPhone(phone);
+  if (!customer) throw new Error('No account found for this number');
+
+  const row = findRowIndex(getCustomersSheet(), row => row[0] === customer.id);
+  if (row > 0) getCustomersSheet().getRange(row, CUSTOMER_HEADERS.indexOf('pin_hash') + 1).setValue(hashPin(pin));
+  cleanupCustomerOtps(phone);
+  writeAudit('customer', customer.id, 'pin_reset', 'customer', customer.id, { phone });
+  return { ok: true, customer: customerResponse(customer), customerToken: customerSession(customer.id) };
+}
+
 function customerRegisterPush(body) {
   const { customerToken, fcmToken } = body || {};
   if (!customerToken || !fcmToken) throw new Error('Missing token');
