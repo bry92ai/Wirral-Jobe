@@ -26,6 +26,8 @@ export default function PaymentForm({
   const cardContainerRef = useRef(null);
   const googleContainerRef = useRef(null);
   const appleContainerRef = useRef(null);
+  const paymentRequestRef = useRef(null);
+  const paymentRequestContainerRef = useRef(null);
   const onConfirmRef = useRef(onConfirm);
   const browserOpenedRef = useRef(false);
 
@@ -60,8 +62,10 @@ export default function PaymentForm({
     const appleContainer = appleContainerRef.current;
     let googlePayButton = null;
     let applePayButton = null;
+    let paymentRequestButton = null;
     let googlePayHandler = null;
     let applePayHandler = null;
+    let paymentRequestHandler = null;
 
     async function tokenize(method) {
       setPayLoading(true);
@@ -126,6 +130,26 @@ export default function PaymentForm({
           }
         }
 
+        const paymentRequestContainer = paymentRequestContainerRef.current;
+        if (paymentRequestContainer && payments.paymentRequest) {
+          try {
+            const paymentRequest = await payments.paymentRequest({
+              request: {
+                price: bookingFee.toFixed(2),
+                priceStatus: 'FINAL',
+                currencyCode: 'GBP',
+                countryCode: 'GB'
+              }
+            });
+            paymentRequestButton = await paymentRequest.attach(paymentRequestContainer);
+            paymentRequestRef.current = paymentRequest;
+            paymentRequestHandler = () => tokenize(paymentRequest);
+            paymentRequestButton.addEventListener('click', paymentRequestHandler);
+          } catch (e) {
+            // Payment Request button not available on this device/browser
+          }
+        }
+
         setReady(true);
       } catch (err) {
         if (mounted) setPayError(err.message || 'Could not load payment form');
@@ -138,6 +162,7 @@ export default function PaymentForm({
       mounted = false;
       if (googlePayButton && googlePayHandler) googlePayButton.removeEventListener('click', googlePayHandler);
       if (applePayButton && applePayHandler) applePayButton.removeEventListener('click', applePayHandler);
+      if (paymentRequestButton && paymentRequestHandler) paymentRequestButton.removeEventListener('click', paymentRequestHandler);
     };
   }, [clientSecret, bookingFee]);
 
@@ -216,6 +241,7 @@ export default function PaymentForm({
           <div ref={cardContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
           <div ref={googleContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
           <div ref={appleContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
+          <div ref={paymentRequestContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
           <p style={{ color: 'var(--cream-dim)', fontSize: '0.8rem', textAlign: 'center', margin: '0.25rem 0 1rem' }}>
             Google Pay / Apple Pay buttons only appear when your device/browser supports them and Square has verified this domain.
           </p>
