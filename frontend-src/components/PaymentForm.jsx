@@ -238,6 +238,10 @@ export default function PaymentForm({
         </span>
       </p>
 
+      <p style={{ fontSize: '0.75rem', color: '#888', textAlign: 'center' }}>
+        DEBUG: path={typeof window !== 'undefined' ? window.location.pathname : ''} jobId={jobId || '-'} outbound={outboundJobId || '-'} return={returnJobId || '-'}
+      </p>
+
       {!onWalletPayPage && (
         <button
           type="button"
@@ -248,6 +252,11 @@ export default function PaymentForm({
         >
           {browserOpen ? 'Waiting for browser payment…' : 'Pay with Google Pay / Apple Pay / saved card'} <b>›</b>
         </button>
+      )}
+      {onWalletPayPage && (
+        <p style={{ fontSize: '0.8rem', color: 'var(--cream-dim)', textAlign: 'center', marginBottom: '1rem' }}>
+          Use your saved card, Google Pay or Apple Pay above.
+        </p>
       )}
 
       {!SQUARE_APP_ID || !SQUARE_LOCATION_ID ? (

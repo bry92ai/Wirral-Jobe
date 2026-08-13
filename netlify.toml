@@ -7,6 +7,11 @@
   GAS_URL = "https://script.google.com/macros/s/AKfycbw4mlXDTCjKpEuGt2pSFirr6N05kcca1l6PeWeP_5oNFN60RqD9flyRanCYvKBTsGo1"
 # NOTE: The live GAS_URL for the Netlify function is set via the Netlify UI environment variable.
 
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api"

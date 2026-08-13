@@ -3,7 +3,7 @@
   "appName": "WirralJobe",
   "webDir": "dist",
   "server": {
-    "url": "https://wirraljobe.com/",
+    "url": "https://wirraljobe.com/?v=4",
     "cleartext": false
   }
 }
