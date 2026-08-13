@@ -201,7 +201,11 @@ export default function PaymentForm({
     browserOpenedRef.current = true;
     setBrowserOpen(true);
     try {
-      await Browser.open({ url });
+      if (Capacitor.isNativePlatform()) {
+        await Browser.open({ url });
+      } else {
+        window.open(url, '_blank');
+      }
     } catch (e) {
       browserOpenedRef.current = false;
       setBrowserOpen(false);
@@ -210,7 +214,8 @@ export default function PaymentForm({
   }
 
   const hasJobContext = !!(jobId || (outboundJobId && returnJobId));
-  const showBrowserOption = Capacitor.isNativePlatform() && hasJobContext;
+  const onWalletPayPage = typeof window !== 'undefined' && window.location.pathname === '/wallet-pay';
+  const showBrowserOption = hasJobContext && !onWalletPayPage;
 
   if (clientSecret !== 'square') {
     return (
