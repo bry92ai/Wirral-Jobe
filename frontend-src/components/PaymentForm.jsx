@@ -216,6 +216,9 @@ export default function PaymentForm({
           <div ref={cardContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
           <div ref={googleContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
           <div ref={appleContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
+          <p style={{ color: 'var(--cream-dim)', fontSize: '0.8rem', textAlign: 'center', margin: '0.25rem 0 1rem' }}>
+            Google Pay / Apple Pay buttons only appear when your device/browser supports them and Square has verified this domain.
+          </p>
 
           {(payError || error) && <p className="error">{payError || error}</p>}
 
