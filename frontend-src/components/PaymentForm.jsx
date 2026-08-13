@@ -238,6 +238,18 @@ export default function PaymentForm({
         </span>
       </p>
 
+      {!onWalletPayPage && (
+        <button
+          type="button"
+          className="wj-details-submit"
+          onClick={openBrowserPayment}
+          disabled={browserOpen || loading || payLoading}
+          style={{ marginBottom: '1rem' }}
+        >
+          {browserOpen ? 'Waiting for browser payment…' : 'Pay with Google Pay / Apple Pay / saved card'} <b>›</b>
+        </button>
+      )}
+
       {!SQUARE_APP_ID || !SQUARE_LOCATION_ID ? (
         <p className="error">Payments are not configured. Please contact support.</p>
       ) : (
@@ -255,21 +267,6 @@ export default function PaymentForm({
           <button className="wj-details-submit" onClick={payWithCard} disabled={!ready || payLoading || loading}>
             {payLoading || loading ? 'Processing…' : `Pay £${Number(bookingFee).toFixed(2)} booking fee`} <b>›</b>
           </button>
-
-          {!onWalletPayPage && (
-            <>
-              <div style={{ textAlign: 'center', color: 'var(--cream-dim)', fontSize: '0.85rem', margin: '0.75rem 0' }}>or</div>
-              <button
-                type="button"
-                className="wj-details-submit wj-outline"
-                onClick={openBrowserPayment}
-                disabled={browserOpen || loading || payLoading}
-                style={{ borderWidth: 3, fontSize: '1.2rem' }}
-              >
-                {browserOpen ? 'Waiting for browser payment…' : 'Open in browser for Google Pay / Apple Pay / saved card'} <b>›</b>
-              </button>
-            </>
-          )}
         </>
       )}
     </div>
