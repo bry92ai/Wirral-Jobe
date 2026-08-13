@@ -215,7 +215,6 @@ export default function PaymentForm({
 
   const hasJobContext = !!(jobId || (outboundJobId && returnJobId));
   const onWalletPayPage = typeof window !== 'undefined' && window.location.pathname === '/wallet-pay';
-  const showBrowserOption = hasJobContext && !onWalletPayPage;
 
   if (clientSecret !== 'square') {
     return (
@@ -257,19 +256,17 @@ export default function PaymentForm({
             {payLoading || loading ? 'Processing…' : `Pay £${Number(bookingFee).toFixed(2)} booking fee`} <b>›</b>
           </button>
 
-          {showBrowserOption && (
+          {!onWalletPayPage && (
             <>
               <div style={{ textAlign: 'center', color: 'var(--cream-dim)', fontSize: '0.85rem', margin: '0.75rem 0' }}>or</div>
-              <p style={{ color: 'var(--cream-dim)', fontSize: '0.85rem', textAlign: 'center', margin: '0 0 0.5rem' }}>
-                If Google Pay / Apple Pay buttons don’t appear above, use your browser’s saved cards or wallets here.
-              </p>
               <button
                 type="button"
                 className="wj-details-submit wj-outline"
                 onClick={openBrowserPayment}
                 disabled={browserOpen || loading || payLoading}
+                style={{ borderWidth: 3, fontSize: '1.2rem' }}
               >
-                {browserOpen ? 'Waiting for browser payment…' : 'Pay with card / Google Pay / Apple Pay in browser'} <b>›</b>
+                {browserOpen ? 'Waiting for browser payment…' : 'Open in browser for Google Pay / Apple Pay / saved card'} <b>›</b>
               </button>
             </>
           )}
