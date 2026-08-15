@@ -184,7 +184,11 @@ function DriverPageContent() {
   };
 
   const queueInfo = useMemo(() => {
-    const zoneId = currentZoneId || profile?.zone || null;
+    let zoneId = currentZoneId || profile?.zone || null;
+    if (!zoneId && myLocation) {
+      const f = findZone(myLocation.lat, myLocation.lng);
+      zoneId = f ? f.properties.zoneId : null;
+    }
     const zoneName = zoneId ? getZoneName(zoneId) : 'Locating...';
     const allDrivers = [profile, ...otherDrivers].filter(Boolean);
     const seen = new Set();
@@ -194,7 +198,7 @@ function DriverPageContent() {
       .sort((a, b) => String(a.availableSince || '9999').localeCompare(String(b.availableSince || '9999'))) : [];
     const position = queue.findIndex(d => d.id === driverId);
     return { zoneId, zoneName, queue, position: position >= 0 ? position + 1 : null };
-  }, [currentZoneId, profile, otherDrivers, driverId]);
+  }, [currentZoneId, profile, otherDrivers, driverId, myLocation]);
 
   const zonePanelInfo = useMemo(() => {
     if (!selectedZoneId) return null;
