@@ -767,9 +767,9 @@ function DriverPageContent() {
         </div>
       )}
 
-      <div style={{ position: 'absolute', bottom: 90, left: 12, right: 12, zIndex: 9999, maxHeight: 160, overflow: 'auto', background: 'rgba(0,0,0,0.9)', border: '2px solid #a3e635', borderRadius: 10, padding: '0.6rem', fontSize: '0.75rem', color: '#a3e635', fontFamily: 'monospace' }}>
-        <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', color: '#fff' }}>DEBUG LOG</div>
-        {debugLog.length === 0 && <div style={{ color: '#888' }}>No log entries yet.</div>}
+      <div style={{ position: 'absolute', top: 150, left: 12, right: 12, zIndex: 99999, maxHeight: 220, overflow: 'auto', background: 'rgba(0,0,0,0.95)', border: '3px solid #a3e635', borderRadius: 12, padding: '0.75rem', fontSize: '0.8rem', color: '#a3e635', fontFamily: 'monospace', boxShadow: '0 0 20px #a3e635' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '0.4rem', color: '#fff', fontSize: '0.95rem' }}>DEBUG LOG</div>
+        {debugLog.length === 0 && <div style={{ color: '#888' }}>No log entries yet. Move the app or wait for GPS.</div>}
         {debugLog.map((line, i) => <div key={i}>{line}</div>)}
       </div>
 
