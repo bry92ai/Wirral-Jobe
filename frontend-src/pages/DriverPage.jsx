@@ -105,6 +105,7 @@ function DriverPageContent() {
   const [followMe, setFollowMe] = useState(true);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
   const [appError, setAppError] = useState('');
+  const [debugLog, setDebugLog] = useState([]);
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -157,6 +158,13 @@ function DriverPageContent() {
     window.onunhandledrejection = onRejection;
     return () => { window.onerror = null; window.onunhandledrejection = null; };
   }, []);
+
+  function logDebug(...args) {
+    const line = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    const entry = `[${new Date().toLocaleTimeString()}] ${line}`;
+    console.log(entry);
+    setDebugLog(prev => [...prev.slice(-19), entry]);
+  }
 
   const activeJob = useMemo(() => (jobs || []).find(j => !['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(j.status)), [jobs]);
 
@@ -585,15 +593,21 @@ function DriverPageContent() {
     let mounted = true;
 
     function sendLocation(lat, lng, zone, accuracy) {
+      logDebug('sendLocation', { lat, lng, zone, accuracy });
       api('driver/location', { lat, lng, zone, accuracy }, driverAuth())
-        .then(() => { lastLocationUpdateRef.current = Date.now(); setLastLocationSentAt(Date.now()); })
+        .then(() => {
+          logDebug('sendLocation OK');
+          lastLocationUpdateRef.current = Date.now(); setLastLocationSentAt(Date.now());
+        })
         .catch(err => {
+          logDebug('sendLocation ERROR', err && err.message);
           if (err && err.message) setLocationError('Location send failed: ' + err.message);
         });
     }
 
     function handlePosition(position) {
       const { latitude, longitude, accuracy, heading: h } = position.coords;
+      logDebug('handlePosition', { latitude, longitude, accuracy });
       if (!mounted) return;
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
       const location = { lat: latitude, lng: longitude };
@@ -750,6 +764,12 @@ function DriverPageContent() {
       {appError && (
         <div style={{ position: 'absolute', top: locationError ? 140 : 76, left: 12, right: 12, zIndex: 1000 }}>
           <pre style={{ margin: 0, padding: '0.6rem 0.9rem', borderRadius: 10, background: 'var(--surface)', border: '1.5px solid rgba(239,68,68,0.4)', color: '#ff9d9d', fontSize: '0.75rem', whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto' }}>{appError}</pre>
+        </div>
+      )}
+
+      {loggedIn && (
+        <div style={{ position: 'absolute', top: (locationError ? 140 : 76) + (appError ? 80 : 0), left: 12, right: 12, zIndex: 1000, maxHeight: 120, overflow: 'auto', background: 'rgba(0,0,0,0.75)', border: '1px solid var(--border)', borderRadius: 10, padding: '0.5rem', fontSize: '0.7rem', color: '#a3e635', fontFamily: 'monospace' }}>
+          {debugLog.map((line, i) => <div key={i}>{line}</div>)}
         </div>
       )}
 
