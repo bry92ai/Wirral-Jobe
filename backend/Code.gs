@@ -420,6 +420,13 @@ function migrateSheetHeaders(ss, name, headers) {
   Logger.log('Migrated sheet "%s" headers. Backup created: "%s_backup_%s"', name, name, timestamp);
 }
 
+function repairDriversHeaders() {
+  const sheet = ensureSheet('Drivers', DRIVER_HEADERS);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  Logger.log('Drivers sheet headers are now: %s', headers.join(', '));
+  return { ok: true, headers: headers, columnCount: headers.length };
+}
+
 function getJobsSheet() { return ensureSheet('Jobs', JOB_HEADERS); }
 function getDriversSheet() { return ensureSheet('Drivers', DRIVER_HEADERS); }
 function getOffersSheet() { return ensureSheet('Offers', OFFER_HEADERS); }
