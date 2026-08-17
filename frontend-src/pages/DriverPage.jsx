@@ -604,6 +604,8 @@ function DriverPageContent() {
       if (h != null && !Number.isNaN(h)) setHeading(h);
       if (!Number.isFinite(accuracy) || accuracy > 200) {
         setLocationError('GPS signal is weak. Move outside or wait for a better fix.');
+        // Still send the raw location so the backend can record it, but don't change the local zone lock.
+        sendLocation(latitude, longitude, currentZoneIdRef.current, accuracy);
         return;
       }
 
