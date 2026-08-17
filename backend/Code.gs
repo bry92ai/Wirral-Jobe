@@ -381,8 +381,43 @@ function ensureSheet(name, headers) {
   }
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(headers);
+    return sheet;
   }
-  return sheet;
+  const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  const exactMatch = currentHeaders.length === headers.length && headers.every((h, i) => h === currentHeaders[i]);
+  if (exactMatch) return sheet;
+  const isPrefix = currentHeaders.every((h, i) => h === headers[i]);
+  if (isPrefix && currentHeaders.length < headers.length) {
+    const missing = headers.slice(currentHeaders.length);
+    if (sheet.getMaxColumns() < headers.length) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), headers.length - sheet.getMaxColumns());
+    }
+    sheet.getRange(1, currentHeaders.length + 1, 1, missing.length).setValues([missing]);
+    Logger.log('Added missing headers to sheet "%s": %s', name, missing.join(', '));
+    return sheet;
+  }
+  Logger.log('Sheet "%s" headers do not match expected format. Migrating...', name);
+  migrateSheetHeaders(ss, name, headers);
+  return ss.getSheetByName(name);
+}
+
+function migrateSheetHeaders(ss, name, headers) {
+  const sheet = ss.getSheetByName(name);
+  const oldHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  const oldData = sheet.getDataRange().getValues();
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backup = sheet.copyTo(ss);
+  backup.setName(name + '_backup_' + timestamp);
+  sheet.clear();
+  sheet.appendRow(headers);
+  for (let i = 1; i < oldData.length; i++) {
+    const row = headers.map(h => {
+      const idx = oldHeaders.indexOf(h);
+      return idx >= 0 && idx < oldData[i].length ? oldData[i][idx] : '';
+    });
+    sheet.appendRow(row);
+  }
+  Logger.log('Migrated sheet "%s" headers. Backup created: "%s_backup_%s"', name, name, timestamp);
 }
 
 function getJobsSheet() { return ensureSheet('Jobs', JOB_HEADERS); }
