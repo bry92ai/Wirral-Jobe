@@ -1266,13 +1266,17 @@ function findDriverById(id) { return getDrivers().find(d => d.id === id); }
 function updateDriver(id, updates) {
   const sheet = getDriversSheet();
   const idx = findRowIndex(sheet, row => row[0] === id);
-  if (idx < 0) return false;
+  if (idx < 0) {
+    Logger.log('updateDriver: row not found for id %s', id);
+    throw new Error('Driver row not found: ' + id);
+  }
   const headers = DRIVER_HEADERS;
   const current = {};
   const row = sheet.getRange(idx, 1, 1, headers.length).getValues()[0];
   headers.forEach((h, i) => current[h] = row[i]);
   Object.keys(updates).forEach(k => { if (updates[k] !== undefined) current[k] = updates[k]; });
   const values = headers.map(h => current[h]);
+  Logger.log('updateDriver: writing id %s values %s', id, JSON.stringify(values));
   sheet.getRange(idx, 1, 1, values.length).setValues([values]);
   SpreadsheetApp.flush();
   return true;
