@@ -767,11 +767,11 @@ function DriverPageContent() {
         </div>
       )}
 
-      {loggedIn && (
-        <div style={{ position: 'absolute', top: (locationError ? 140 : 76) + (appError ? 80 : 0), left: 12, right: 12, zIndex: 1000, maxHeight: 120, overflow: 'auto', background: 'rgba(0,0,0,0.75)', border: '1px solid var(--border)', borderRadius: 10, padding: '0.5rem', fontSize: '0.7rem', color: '#a3e635', fontFamily: 'monospace' }}>
-          {debugLog.map((line, i) => <div key={i}>{line}</div>)}
-        </div>
-      )}
+      <div style={{ position: 'absolute', bottom: 90, left: 12, right: 12, zIndex: 9999, maxHeight: 160, overflow: 'auto', background: 'rgba(0,0,0,0.9)', border: '2px solid #a3e635', borderRadius: 10, padding: '0.6rem', fontSize: '0.75rem', color: '#a3e635', fontFamily: 'monospace' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', color: '#fff' }}>DEBUG LOG</div>
+        {debugLog.length === 0 && <div style={{ color: '#888' }}>No log entries yet.</div>}
+        {debugLog.map((line, i) => <div key={i}>{line}</div>)}
+      </div>
 
       <div ref={mapRef} style={{ flex: 1, minHeight: 0 }} />
 
