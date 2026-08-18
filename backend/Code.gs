@@ -1,4 +1,5 @@
 const SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+const ADMIN_PASSWORD_HASH = PropertiesService.getScriptProperties().getProperty('ADMIN_PASSWORD_HASH');
 const ADMIN_PASSWORD = PropertiesService.getScriptProperties().getProperty('ADMIN_PASSWORD');
 const FUTURE_ALLOCATION_WINDOW_MINUTES = 45;
 const DRIVER_LOCATION_FRESHNESS_MINUTES = 5;
@@ -279,7 +280,13 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   const parts = r.split('/').filter(Boolean);
 
   if (r === 'ping') return { ok: true, time: new Date().toISOString() };
-  if (r === 'drivers') return { drivers: getAvailableDrivers() };
+  if (r === 'drivers') {
+    if (driverId && driverToken) {
+      requireDriver(driverId, driverToken);
+      return { drivers: getAvailableDriversWithLocation() };
+    }
+    return { drivers: getAvailableDrivers() };
+  }
   if (r === 'booking') return createBooking(body);
   if (r === 'booking/return-pair') return createReturnPair(body);
   if (r === 'booking/confirm') return confirmBooking(body);
@@ -467,6 +474,10 @@ function revokeDriverTokenByToken(token) {
 function getCustomerTokensSheet() { return ensureSheet('CustomerTokens', ['customerId', 'token', 'created_at']); }
 function setCustomerToken(customerId, token) {
   const sheet = getCustomerTokensSheet();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = rows.length - 1; i >= 1; i--) {
+    if (String(rows[i][0]) === String(customerId)) sheet.deleteRow(i + 1);
+  }
   sheet.appendRow([customerId, token, new Date().toISOString()]);
 }
 function getCustomerIdByToken(token) {
@@ -690,11 +701,13 @@ function publicAppUrl() { return PropertiesService.getScriptProperties().getProp
 function buildTrackingLink(token) { const base = publicAppUrl(); return base ? base + '/track/' + encodeURIComponent(token) : ''; }
 function buildBookingLink(job) { const base = publicAppUrl(); return base ? base + '/booking/' + encodeURIComponent(job.id) + '?token=' + encodeURIComponent(job.tracking_token) : ''; }
 
+const SECURE_ACTION_TTL_MS = 24 * 60 * 60 * 1000;
 function secureActionToken(jobId, driverId, action) {
   const secret = PropertiesService.getScriptProperties().getProperty('SECURE_LINK_SECRET');
   if (!secret) return '';
-  const signature = Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_256, jobId + ':' + driverId + ':' + action, secret);
-  return signature.map(b => (b + 256).toString(16).slice(-2)).join('');
+  const timestamp = Date.now();
+  const signature = Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_256, jobId + ':' + driverId + ':' + action + ':' + timestamp, secret);
+  return signature.map(b => (b + 256).toString(16).slice(-2)).join('') + '.' + timestamp;
 }
 function buildSecureActionLink(jobId, driverId, action) {
   const base = publicAppUrl();
@@ -708,7 +721,8 @@ function renderSmsBody(key, data) {
   if (!template) return null;
   let body = template.template;
   Object.keys(data).forEach(placeholder => {
-    body = body.split('{' + placeholder + '}').join(String(data[placeholder] || ''));
+    const value = String(data[placeholder] || '').replace(/\{/g, '\\{').replace(/\}/g, '\\}');
+    body = body.split('{' + placeholder + '}').join(value);
   });
   return body;
 }
@@ -950,11 +964,24 @@ function getAdminPendingSms() {
   return messages;
 }
 
+function verifySecureActionToken(jobId, driverId, action, token) {
+  if (!token) return false;
+  const parts = String(token).split('.');
+  if (parts.length !== 2) return false;
+  const [sig, timestamp] = parts;
+  if (!timestamp || !/^\d+$/.test(timestamp)) return false;
+  if (Date.now() - Number(timestamp) > SECURE_ACTION_TTL_MS) return false;
+  const secret = PropertiesService.getScriptProperties().getProperty('SECURE_LINK_SECRET');
+  if (!secret) return false;
+  const expected = Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_256, jobId + ':' + driverId + ':' + action + ':' + timestamp, secret)
+    .map(b => (b + 256).toString(16).slice(-2)).join('');
+  return sig === expected;
+}
+
 function handleSecureDriverAction(body) {
   const { jobId, driverId, action, token } = body || {};
   if (!jobId || !driverId || !action || !token) throw new Error('Missing secure action parameters');
-  const expected = secureActionToken(jobId, driverId, action);
-  if (token !== expected) throw new Error('Invalid secure link');
+  if (!verifySecureActionToken(jobId, driverId, action, token)) throw new Error('Invalid or expired secure link');
   if (action === 'accept') {
     try { return acceptOffer(jobId, driverId); } catch (e) {
       try { return acceptFutureOffer(jobId, driverId); } catch (e2) { throw e; }
@@ -1236,6 +1263,11 @@ function isDriverLocationFresh(driver) {
 }
 function getAvailableDrivers() {
   return getDrivers().filter(d => d.status === 'AVAILABLE').map(d => ({
+    id: d.id, name: d.name, vehicle_type: d.vehicle_type, zone: driverZone(d), available_since: d.available_since || null, status: d.status
+  }));
+}
+function getAvailableDriversWithLocation() {
+  return getDrivers().filter(d => d.status === 'AVAILABLE').map(d => ({
     id: d.id, name: d.name, vehicle_type: d.vehicle_type, zone: driverZone(d), available_since: d.available_since || null,
     last_lat: Number(d.last_lat) || null, last_lng: Number(d.last_lng) || null, status: d.status
   }));
@@ -1458,6 +1490,9 @@ function updateDriverLocation(body, driverId) {
   if (!driverId) throw new Error('No driver ID');
   const { lat, lng } = body || {};
   if (lat == null || lng == null) throw new Error('Missing coordinates');
+  const numLat = Number(lat);
+  const numLng = Number(lng);
+  if (Number.isNaN(numLat) || numLat < -90 || numLat > 90 || Number.isNaN(numLng) || numLng < -180 || numLng > 180) throw new Error('Invalid coordinates');
   const d = findDriverById(driverId);
   if (!d) throw new Error('Driver not found');
   const now = new Date().toISOString();
@@ -1466,7 +1501,7 @@ function updateDriverLocation(body, driverId) {
   const frontendZone = (body || {}).zone;
   const acceptedFrontendZone = !backendZone && frontendZone && isValidZoneId(frontendZone) ? frontendZone : '';
   const storedZone = backendZone || acceptedFrontendZone || (isDriverLocationFresh(d) ? d.zone : '');
-  updateDriver(driverId, { last_lat: lat, last_lng: lng, last_location_at: now, zone: storedZone });
+  updateDriver(driverId, { last_lat: numLat, last_lng: numLng, last_location_at: now, zone: storedZone });
 
   // Update distance meter for any POB job
   getJobs().filter(job => job.driver_id === driverId && job.status === 'POB').forEach(job => {
@@ -1859,7 +1894,12 @@ function setJobStatus(jobId, body, driverId) {
   if (status === 'COMPLETE') {
     const driver = findDriverById(driverId);
     const rate = Number(driver?.commission_rate) || 0;
-    const commission = rate > 0 ? Math.round(job.fare * rate) / 100 : 0;
+    let actualFare = Number(job.fare) || 0;
+    try {
+      const notes = JSON.parse(job.notes || '{}');
+      if (notes.meterFare && Number(notes.meterFare) > 0) actualFare = Number(notes.meterFare);
+    } catch (e) {}
+    const commission = rate > 0 ? Math.round(actualFare * rate) / 100 : 0;
     updateDriver(driverId, {
       status: 'AVAILABLE',
       available_since: now,
@@ -2013,9 +2053,10 @@ function acceptOffer(jobId, driverId) {
   const sheet = getOffersSheet();
   const row = sheet.getRange(idx, 1, 1, OFFER_HEADERS.length).getValues()[0];
   if (row[1] !== driverId) throw new Error('No active offer');
+  const job = findJobById(jobId);
+  if (job && job.driver_id && job.driver_id !== driverId) throw new Error('Job already assigned to another driver');
   const driver = findDriverById(driverId);
   if (!driver) throw new Error('Driver not found');
-  const job = findJobById(jobId);
   const pickupTime = new Date(job?.pickup_time || new Date().toISOString()).getTime();
   const dispatchNow = pickupTime <= Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
   const now = new Date().toISOString();
@@ -2277,6 +2318,7 @@ function acceptFutureOffer(jobId, driverId) {
   if (row[1] !== driverId) throw new Error('No active future offer');
   const job = findJobById(jobId);
   if (!job) throw new Error('Job not found');
+  if (job.driver_id && job.driver_id !== driverId) throw new Error('Job already assigned to another driver');
   const driver = findDriverById(driverId);
   if (!driver) throw new Error('Driver not found');
   const now = new Date().toISOString();
@@ -2322,8 +2364,10 @@ function dispatchFutureBooking(jobId) {
   if (!job || !job.driver_id || job.status !== 'SCHEDULED') return { ok: false, error: 'Not a scheduled future booking' };
   const idx = futureOfferRowIndex(jobId);
   if (idx >= 0) getFutureOffersSheet().deleteRow(idx);
-  const driver = findDriverById(job.driver_id);
   updateJob(job.id, { status: 'ASSIGNED', updated_at: new Date().toISOString() });
+  const updatedJob = findJobById(jobId);
+  if (updatedJob.status !== 'ASSIGNED') return { ok: false, error: 'Dispatch failed due to concurrent modification' };
+  const driver = findDriverById(job.driver_id);
   if (driver) updateDriver(job.driver_id, { status: 'BUSY' });
   writeAudit('system', '', 'future_booking_dispatched', 'job', job.id, { driverId: job.driver_id, source: 'admin_force' });
   return { ok: true, status: 'ASSIGNED', jobId: job.id, driverId: job.driver_id };
@@ -2408,7 +2452,16 @@ function bulkUpdateDrivers(body) {
 
 function adminLogin(body) {
   const { password } = body || {};
-  if (!password || password !== ADMIN_PASSWORD) throw new Error('Invalid admin password');
+  if (!password) throw new Error('Invalid admin password');
+  const hashedInput = hashPin(password);
+  if (ADMIN_PASSWORD_HASH) {
+    if (hashedInput !== ADMIN_PASSWORD_HASH) throw new Error('Invalid admin password');
+  } else if (ADMIN_PASSWORD) {
+    Logger.log('WARNING: ADMIN_PASSWORD is deprecated. Set ADMIN_PASSWORD_HASH instead.');
+    if (password !== ADMIN_PASSWORD) throw new Error('Invalid admin password');
+  } else {
+    throw new Error('Admin password not configured');
+  }
   const token = Utilities.getUuid();
   CacheService.getScriptCache().put(token, '1', 3600);
   return { token };

@@ -63,8 +63,7 @@ export default function AdminPage() {
     abortRef.current = controller;
     try {
       const headers = { 'x-admin-token': token };
-      const opts = { signal: controller.signal };
-      const [j, d, a, fo, al, b, t, sms] = await Promise.all([
+      const [j, d, a, fo, al, b, t, sms, tpl] = await Promise.all([
         apiGet('/admin/jobs', headers, controller.signal),
         apiGet('/admin/drivers', headers, controller.signal),
         apiGet('/admin/driver-applications', headers, controller.signal),
@@ -72,7 +71,8 @@ export default function AdminPage() {
         apiGet('/admin/audit-log', headers, controller.signal),
         apiGet('/admin/bids', headers, controller.signal),
         apiGet('/admin/tariff', headers, controller.signal),
-        apiGet('/admin/pending-sms', headers, controller.signal)
+        apiGet('/admin/pending-sms', headers, controller.signal),
+        apiGet('/admin/sms-templates', headers, controller.signal)
       ]);
       if (controller.signal.aborted) return;
       setJobs(j.jobs);
@@ -83,6 +83,7 @@ export default function AdminPage() {
       setBids(b.bids || []);
       setTariff(t.tariff || null);
       setPendingSms(sms.messages || []);
+      setSmsTemplates(tpl.templates || []);
       setError('');
     } catch (err) {
       if (err.name === 'AbortError') return;

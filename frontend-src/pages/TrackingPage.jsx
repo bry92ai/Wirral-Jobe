@@ -53,8 +53,8 @@ export default function TrackingPage() {
               <i />
               <div><span>Destination</span><strong>{job.dropoffAddress}</strong></div>
             </div>
-            <div className="wj-track-meta"><div><small>Reference</small><strong>{job.jobId}</strong></div><div><small>Fare</small><strong>£{job.fare.toFixed(2)}</strong></div></div>
-            {job.driverId && <div className="wj-track-driver"><span>Driver</span><strong>{job.driverId}</strong>{job.driverLat != null && <small>Location updated {new Date(job.driverLocationAt).toLocaleTimeString()}</small>}</div>}
+            <div className="wj-track-meta"><div><small>Reference</small><strong>{job.jobId}</strong></div><div><small>Fare</small><strong>£{Number(job.fare || 0).toFixed(2)}</strong></div></div>
+            {job.driverId && <div className="wj-track-driver"><span>Driver</span><strong>{job.driverId}</strong>{job.driverLat != null && job.driverLocationAt && <small>Location updated {new Date(job.driverLocationAt).toLocaleTimeString()}</small>}</div>}
             <div className="wj-track-progress">
               {stages.map((stage, index) => <div key={stage} className={activeStage >= index ? 'active' : ''}><i /> <span>{stage.replace('_', ' ')}</span></div>)}
             </div>

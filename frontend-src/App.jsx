@@ -26,26 +26,24 @@ export default function App() {
       if (res.receive === 'granted') {
         PushNotifications.register();
       }
-    }).catch(() => {});
+    }).catch(err => console.error('Push permission error:', err));
     PushNotifications.addListener('registration', token => {
-      console.log('FCM token:', token.value);
       const customerToken = localStorage.getItem(SESSION_KEY);
       const driverToken = localStorage.getItem('driverToken');
       if (customerToken) {
-        api('customer/register-push', { customerToken, fcmToken: token.value }).catch(() => {});
+        api('customer/register-push', { customerToken, fcmToken: token.value }).catch(err => console.error('Customer push registration failed:', err));
       }
       if (driverToken) {
-        api('driver/register-push', { driverToken, fcmToken: token.value }).catch(() => {});
+        api('driver/register-push', { driverToken, fcmToken: token.value }).catch(err => console.error('Driver push registration failed:', err));
       }
     });
     PushNotifications.addListener('registrationError', err => {
-      console.warn('Push registration error:', err);
+      console.error('Push registration error:', err);
     });
     PushNotifications.addListener('pushNotificationReceived', notification => {
-      console.log('Push received in foreground:', notification);
+      // Notification received in foreground
     });
     PushNotifications.addListener('pushNotificationActionPerformed', action => {
-      console.log('Push action performed:', action);
       const data = action.notification?.data;
       if (data?.route) {
         window.location.hash = '';

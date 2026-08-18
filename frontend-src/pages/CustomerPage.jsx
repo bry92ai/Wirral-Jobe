@@ -153,7 +153,7 @@ export default function CustomerPage() {
   }
 
   async function logout() {
-    try { await api('customer/logout', { customerToken: token() }); } catch {}
+    try { await api('customer/logout', { customerToken: token() }); } catch (err) { console.error(err); }
     localStorage.removeItem(SESSION_KEY); setCustomer(null); setJobs([]); setPlaces([]);
     setAuthStep('login'); resetForm();
   }

@@ -281,7 +281,7 @@ export default function BookingPage() {
       try {
         const data = await apiGet(`/tracking/${result.trackingToken}`);
         if (alive) setTrackingJob(data);
-      } catch {}
+      } catch (err) { console.error(err); }
     }
     loadTracking();
     const id = setInterval(loadTracking, 5000);
@@ -1002,7 +1002,17 @@ export default function BookingPage() {
             </div>
             {panelTitle('Payment')}
             {result ? (
-              <PaymentForm fare={result.fare} bookingFee={result.bookingFee} clientSecret={clientSecret} onConfirm={confirmPayment} loading={loading} error={error} />
+              <PaymentForm
+                fare={result.fare}
+                bookingFee={result.bookingFee}
+                clientSecret={clientSecret}
+                onConfirm={confirmPayment}
+                loading={loading}
+                error={error}
+                jobId={paymentTarget !== 'pair' ? result.jobId : undefined}
+                outboundJobId={paymentTarget === 'pair' ? result.outboundJobId : undefined}
+                returnJobId={paymentTarget === 'pair' ? returnResult?.jobId : undefined}
+              />
             ) : (
               <p className="error">No booking data. Please go back and try again.</p>
             )}

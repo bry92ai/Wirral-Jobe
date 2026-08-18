@@ -17,7 +17,7 @@ function playOfferSound() {
     utterance.pitch = 1;
     utterance.volume = 1;
     window.speechSynthesis.speak(utterance);
-  } catch {}
+  } catch (err) { console.error(err); }
 }
 
 const NavIcon = {
@@ -239,7 +239,7 @@ function DriverPageContent() {
   }
 
   async function logout() {
-    try { await api('driver/logout', {}, driverAuth()); } catch {}
+    try { await api('driver/logout', {}, driverAuth()); } catch (err) { console.error(err); }
     localStorage.removeItem('driverId');
     localStorage.removeItem('driverName');
     localStorage.removeItem('driverToken');
@@ -278,7 +278,7 @@ function DriverPageContent() {
         if (ageMs >= 0 && ageMs < 120000) setLocationOk(true);
       }
     }
-    catch {}
+    catch (err) { console.error(err); }
   }
 
   async function loadJobs(id = driverId) {
@@ -288,32 +288,32 @@ function DriverPageContent() {
 
   async function loadOffers(id = driverId) {
     try { const data = await apiGet('/driver/offers', driverAuth(id)); setOffers(data.offers); }
-    catch {}
+    catch (err) { console.error(err); }
   }
 
   async function loadOtherDrivers() {
-    try { const data = await apiGet('/drivers'); setOtherDrivers(data.drivers || []); }
-    catch {}
+    try { const data = await apiGet('/drivers', driverAuth()); setOtherDrivers(data.drivers || []); }
+    catch (err) { console.error(err); }
   }
 
   async function loadBidBoard(id = driverId) {
     try { const data = await apiGet('/driver/bid-board', driverAuth(id)); setBidBoard(data.jobs || []); }
-    catch {}
+    catch (err) { console.error(err); }
   }
 
   async function loadMyBids(id = driverId) {
     try { const data = await apiGet('/driver/my-bids', driverAuth(id)); setMyBids(data.bids || []); }
-    catch {}
+    catch (err) { console.error(err); }
   }
 
   async function loadFutureBookings(id = driverId) {
     try { const data = await apiGet('/driver/future-bookings', driverAuth(id)); setFutureBookings(data.jobs || []); }
-    catch {}
+    catch (err) { console.error(err); }
   }
 
   async function loadFutureOffers(id = driverId) {
     try { const data = await apiGet('/driver/future-offers', driverAuth(id)); setFutureOffers(data.offers || []); }
-    catch {}
+    catch (err) { console.error(err); }
   }
 
   async function placeBid(jobId, amount) {
