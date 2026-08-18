@@ -4,7 +4,7 @@
   functions = "netlify/functions"
 
 [build.environment]
-  GAS_URL = "https://script.google.com/macros/s/AKfycbw4mlXDTCjKpEuGt2pSFirr6N05kcca1l6PeWeP_5oNFN60RqD9flyRanCYvKBTsGo1"
+  GAS_URL = "https://script.google.com/macros/s/AKfycbw2N78ynEwuTcjh9zLfmoywJjJkB4mg6Np1s7toZBu06gyQEqun6TC2BPZXtenZznvy"
 # NOTE: The live GAS_URL for the Netlify function is set via the Netlify UI environment variable.
 
 [[headers]]
