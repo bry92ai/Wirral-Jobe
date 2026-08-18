@@ -68,9 +68,15 @@ function formatPhone(tel) {
   const cleaned = String(tel).replace(/\s/g, '');
   return cleaned.startsWith('0') ? `+44${cleaned.slice(1)}` : cleaned;
 }
-function directionsUrl(address, lat, lng) {
-  if (lat != null && lng != null) return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
+function navigationUrls(address, lat, lng) {
+  const hasCoords = lat != null && lng != null;
+  const destination = hasCoords ? `${lat},${lng}` : encodeURIComponent(address || '');
+  return {
+    google: `https://www.google.com/maps/dir/?api=1&destination=${destination}`,
+    waze: hasCoords
+      ? `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`
+      : `https://waze.com/ul?q=${destination}&navigate=yes`
+  };
 }
 
 const offerIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 24"><path fill="#22c55e" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
@@ -98,6 +104,7 @@ function DriverPageContent() {
   const [openPanel, setOpenPanel] = useState(null);
   const [bidBoard, setBidBoard] = useState([]);
   const [selectedBid, setSelectedBid] = useState(null);
+  const [navigationTarget, setNavigationTarget] = useState(null);
   const [bidTab, setBidTab] = useState('open');
   const [myBids, setMyBids] = useState([]);
   const [futureBookings, setFutureBookings] = useState([]);
@@ -928,8 +935,8 @@ function DriverPageContent() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: '0.75rem' }}>
-              <a href={directionsUrl(activeJob.pickupAddress, activeJob.pickupLat, activeJob.pickupLng)} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>To pickup</a>
-              <a href={directionsUrl(activeJob.dropoffAddress, activeJob.dropoffLat, activeJob.dropoffLng)} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>To drop-off</a>
+              <button type="button" onClick={() => setNavigationTarget({ label: 'pickup', address: activeJob.pickupAddress, lat: activeJob.pickupLat, lng: activeJob.pickupLng })} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Nav to pickup</button>
+              <button type="button" onClick={() => setNavigationTarget({ label: 'drop off', address: activeJob.dropoffAddress, lat: activeJob.dropoffLat, lng: activeJob.dropoffLng })} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Nav to drop off</button>
             </div>
             {activeJob.customerPhone && (
               <a href={`tel:${formatPhone(activeJob.customerPhone)}`} className="btn btn-outline btn-sm" style={{ display: 'block', textAlign: 'center', marginBottom: '0.75rem' }}>Call passenger</a>
@@ -950,6 +957,26 @@ function DriverPageContent() {
           </div>
         </div>
       )}
+
+      {navigationTarget && (() => {
+        const urls = navigationUrls(navigationTarget.address, navigationTarget.lat, navigationTarget.lng);
+        return (
+          <div
+            onClick={() => setNavigationTarget(null)}
+            style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.68)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 12 }}
+          >
+            <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 520, borderRadius: 20, padding: '1rem', border: '1.5px solid var(--border-strong)' }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', fontWeight: 800, marginBottom: 4 }}>Navigate to {navigationTarget.label}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--cream-dim)', marginBottom: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{navigationTarget.address}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <a href={urls.waze} target="_blank" rel="noreferrer" onClick={() => setNavigationTarget(null)} className="btn btn-primary" style={{ textAlign: 'center', textDecoration: 'none' }}>Waze</a>
+                <a href={urls.google} target="_blank" rel="noreferrer" onClick={() => setNavigationTarget(null)} className="btn btn-outline" style={{ textAlign: 'center', textDecoration: 'none' }}>Google Maps</a>
+              </div>
+              <button type="button" onClick={() => setNavigationTarget(null)} className="btn btn-outline btn-sm" style={{ width: '100%', marginTop: 8 }}>Cancel</button>
+            </div>
+          </div>
+        );
+      })()}
 
       {!activeJob && selectedBid && (
         <div style={{ position: 'absolute', bottom: 72, left: 12, right: 12, zIndex: 1001, maxHeight: '45vh', overflowY: 'auto' }}>

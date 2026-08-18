@@ -291,7 +291,7 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'booking/return-pair') return createReturnPair(body);
   if (r === 'booking/confirm') return confirmBooking(body);
   if (r === 'booking/confirm-pair') return confirmReturnPair(body);
-  if (r === 'tracking' && parts.length >= 2) return getTracking(parts[1]);
+  if (parts[0] === 'tracking' && parts.length >= 2) return getTracking(parts[1]);
   if (r === 'customer/request-otp') return customerRequestOtp(body);
   if (r === 'customer/register') return customerRegister(body);
   if (r === 'customer/login') return customerLogin(body);
