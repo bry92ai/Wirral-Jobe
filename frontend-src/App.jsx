@@ -30,7 +30,7 @@ export default function App() {
     PushNotifications.addListener('registration', token => {
       console.log('FCM token:', token.value);
       const customerToken = localStorage.getItem(SESSION_KEY);
-      const driverToken = localStorage.getItem('wirralDriverToken');
+      const driverToken = localStorage.getItem('driverToken');
       if (customerToken) {
         api('customer/register-push', { customerToken, fcmToken: token.value }).catch(() => {});
       }

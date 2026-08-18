@@ -121,6 +121,7 @@ function DriverPageContent() {
   const pendingZoneRef = useRef(null);
   const lastLocationUpdateRef = useRef(0);
   const lastGpsReadingRef = useRef(0);
+  const refreshLocationRef = useRef(null);
   const currentZoneIdRef = useRef(currentZoneId);
 
   useEffect(() => { currentZoneIdRef.current = currentZoneId; }, [currentZoneId]);
@@ -372,12 +373,18 @@ function DriverPageContent() {
 
   async function requestLocation() {
     setLocationError('');
+    logDebug('requestLocation');
+    if (refreshLocationRef.current) {
+      refreshLocationRef.current();
+      return;
+    }
+    logDebug('requestLocation: no refreshLocationRef, using fallback');
     try {
       const perm = await Geolocation.requestPermissions();
       logDebug('requestLocation perm', perm);
       if (perm && perm.location === 'denied') throw { code: 1, message: 'Location access denied' };
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
-      const { latitude, longitude, accuracy, heading: h } = pos.coords;
+      const { latitude, longitude, heading: h } = pos.coords;
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
       setMyLocation({ lat: latitude, lng: longitude });
       setLocationOk(true);
@@ -392,7 +399,7 @@ function DriverPageContent() {
       }
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const { latitude, longitude, accuracy, heading: h } = position.coords;
+          const { latitude, longitude, heading: h } = position.coords;
           if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
           setMyLocation({ lat: latitude, lng: longitude });
           setLocationOk(true);
@@ -716,11 +723,15 @@ function DriverPageContent() {
     async function refreshLocation() {
       logDebug('refreshLocation');
       try {
-        await safeGetCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+        const position = await safeGetCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+        handlePosition(position);
+        return;
       } catch (err1) {
         logDebug('refreshLocation highAccuracy failed', err1 && err1.message);
         try {
-          await safeGetCurrentPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+          const position = await safeGetCurrentPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+          handlePosition(position);
+          return;
         } catch (err2) {
           logDebug('refreshLocation lowAccuracy failed', err2 && err2.message);
           onGeoError(err2);
@@ -728,6 +739,7 @@ function DriverPageContent() {
       }
     }
 
+    refreshLocationRef.current = refreshLocation;
     logDebug('location effect start', { loggedIn, hasGeolocation: !!navigator.geolocation, driverId });
     refreshLocation();
     const interval = setInterval(refreshLocation, 10000);

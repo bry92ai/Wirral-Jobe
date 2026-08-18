@@ -1142,9 +1142,8 @@ function customerRegisterPush(body) {
 function driverRegisterPush(body) {
   const { driverToken, fcmToken } = body || {};
   if (!driverToken || !fcmToken) throw new Error('Missing token');
-  const session = getDriverSessions().find(s => s.token === driverToken);
-  if (!session) throw new Error('Invalid driver token');
-  const driverId = session.driverId || session.driver_id;
+  const driverId = getDriverIdByToken(driverToken);
+  if (!driverId) throw new Error('Invalid driver token');
   updateDriver(driverId, { fcm_token: fcmToken });
   return { ok: true };
 }
@@ -1420,7 +1419,8 @@ function driverLogin(body) {
   ensureDrivers();
   const d = findDriverById(String(driverId || ''));
   if (!d || !driverPinMatches(d, pin)) throw new Error('Invalid driver ID or PIN');
-  return { ok: true, driverId: d.id, name: d.name, token: driverSession(d.id) };
+  updateDriver(d.id, { status: 'AVAILABLE', available_since: new Date().toISOString() });
+  return { ok: true, driverId: d.id, name: d.name, token: driverSession(d.id), status: 'AVAILABLE' };
 }
 
 function driverLogout(body, driverId, token) {
