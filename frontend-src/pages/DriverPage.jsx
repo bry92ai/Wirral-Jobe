@@ -106,7 +106,6 @@ function DriverPageContent() {
   const [followMe, setFollowMe] = useState(true);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
   const [appError, setAppError] = useState('');
-  const [debugLog, setDebugLog] = useState([]);
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -159,17 +158,6 @@ function DriverPageContent() {
     window.onerror = onErr;
     window.onunhandledrejection = onRejection;
     return () => { window.onerror = null; window.onunhandledrejection = null; };
-  }, []);
-
-  function logDebug(...args) {
-    const line = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
-    const entry = `[${new Date().toLocaleTimeString()}] ${line}`;
-    console.log(entry);
-    setDebugLog(prev => [...prev.slice(-19), entry]);
-  }
-
-  useEffect(() => {
-    logDebug('DriverPage mounted');
   }, []);
 
   const activeJob = useMemo(() => (jobs || []).find(j => !['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(j.status)), [jobs]);
@@ -373,15 +361,12 @@ function DriverPageContent() {
 
   async function requestLocation() {
     setLocationError('');
-    logDebug('requestLocation');
     if (refreshLocationRef.current) {
       refreshLocationRef.current();
       return;
     }
-    logDebug('requestLocation: no refreshLocationRef, using fallback');
     try {
       const perm = await Geolocation.requestPermissions();
-      logDebug('requestLocation perm', perm);
       if (perm && perm.location === 'denied') throw { code: 1, message: 'Location access denied' };
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
       const { latitude, longitude, heading: h } = pos.coords;
@@ -392,7 +377,6 @@ function DriverPageContent() {
       lastGpsReadingRef.current = Date.now();
       if (h != null && !Number.isNaN(h)) setHeading(h);
     } catch (err) {
-      logDebug('requestLocation capacitor failed, falling back', err && (err.message || err.code));
       if (!navigator.geolocation) {
         setLocationError('Geolocation is not supported by this browser/device.');
         return;
@@ -620,21 +604,17 @@ function DriverPageContent() {
     let mounted = true;
 
     function sendLocation(lat, lng, zone, accuracy) {
-      logDebug('sendLocation', { lat, lng, zone, accuracy });
       api('driver/location', { lat, lng, zone, accuracy }, driverAuth())
         .then(() => {
-          logDebug('sendLocation OK');
           lastLocationUpdateRef.current = Date.now(); setLastLocationSentAt(Date.now());
         })
         .catch(err => {
-          logDebug('sendLocation ERROR', err && err.message);
           if (err && err.message) setLocationError('Location send failed: ' + err.message);
         });
     }
 
     function handlePosition(position) {
       const { latitude, longitude, accuracy, heading: h } = position.coords;
-      logDebug('handlePosition', { latitude, longitude, accuracy });
       if (!mounted) return;
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
       const location = { lat: latitude, lng: longitude };
@@ -684,7 +664,6 @@ function DriverPageContent() {
     }
 
     function onGeoError(err) {
-      logDebug('onGeoError', err && { code: err.code, message: err.message });
       setLocationOk(false);
       if (!err) return;
       if (err.code === 1) {
@@ -699,10 +678,8 @@ function DriverPageContent() {
     async function safeGetCurrentPosition(options) {
       try {
         const perm = await Geolocation.requestPermissions();
-        logDebug('geolocation perm', perm);
         if (perm && perm.location === 'denied') throw { code: 1, message: 'Location access denied' };
         const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: options.enableHighAccuracy !== false, timeout: options.timeout || 10000 });
-        logDebug('geolocation capacitor ok', { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy });
         return {
           coords: {
             latitude: pos.coords.latitude,
@@ -712,7 +689,6 @@ function DriverPageContent() {
           }
         };
       } catch (capErr) {
-        logDebug('geolocation capacitor failed, falling back', capErr && (capErr.message || capErr.code));
         return new Promise((resolve, reject) => {
           if (!navigator.geolocation) return reject({ code: 2, message: 'Geolocation not supported' });
           navigator.geolocation.getCurrentPosition(resolve, reject, options);
@@ -721,26 +697,22 @@ function DriverPageContent() {
     }
 
     async function refreshLocation() {
-      logDebug('refreshLocation');
       try {
         const position = await safeGetCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
         handlePosition(position);
         return;
       } catch (err1) {
-        logDebug('refreshLocation highAccuracy failed', err1 && err1.message);
         try {
           const position = await safeGetCurrentPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
           handlePosition(position);
           return;
         } catch (err2) {
-          logDebug('refreshLocation lowAccuracy failed', err2 && err2.message);
           onGeoError(err2);
         }
       }
     }
 
     refreshLocationRef.current = refreshLocation;
-    logDebug('location effect start', { loggedIn, hasGeolocation: !!navigator.geolocation, driverId });
     refreshLocation();
     const interval = setInterval(refreshLocation, 10000);
     const fallbackTimeout = setTimeout(() => {
@@ -820,12 +792,6 @@ function DriverPageContent() {
           <pre style={{ margin: 0, padding: '0.6rem 0.9rem', borderRadius: 10, background: 'var(--surface)', border: '1.5px solid rgba(239,68,68,0.4)', color: '#ff9d9d', fontSize: '0.75rem', whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto' }}>{appError}</pre>
         </div>
       )}
-
-      <div style={{ position: 'absolute', top: 150, left: 12, right: 12, zIndex: 99999, maxHeight: 220, overflow: 'auto', background: 'rgba(0,0,0,0.95)', border: '3px solid #a3e635', borderRadius: 12, padding: '0.75rem', fontSize: '0.8rem', color: '#a3e635', fontFamily: 'monospace', boxShadow: '0 0 20px #a3e635' }}>
-        <div style={{ fontWeight: 'bold', marginBottom: '0.4rem', color: '#fff', fontSize: '0.95rem' }}>DEBUG LOG</div>
-        {debugLog.length === 0 && <div style={{ color: '#888' }}>No log entries yet. Move the app or wait for GPS.</div>}
-        {debugLog.map((line, i) => <div key={i}>{line}</div>)}
-      </div>
 
       <div ref={mapRef} style={{ flex: 1, minHeight: 0 }} />
 
