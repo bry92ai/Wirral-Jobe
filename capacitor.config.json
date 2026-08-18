@@ -1,5 +1,8 @@
 {
   "appId": "com.wirraljobe.app",
   "appName": "WirralJobe",
-  "webDir": "dist"
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
 }
