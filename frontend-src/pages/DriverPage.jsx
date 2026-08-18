@@ -166,6 +166,10 @@ function DriverPageContent() {
     setDebugLog(prev => [...prev.slice(-19), entry]);
   }
 
+  useEffect(() => {
+    logDebug('DriverPage mounted');
+  }, []);
+
   const activeJob = useMemo(() => (jobs || []).find(j => !['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(j.status)), [jobs]);
 
   const liveMeter = useMemo(() => {
@@ -657,6 +661,7 @@ function DriverPageContent() {
     }
 
     function onGeoError(err) {
+      logDebug('onGeoError', err && { code: err.code, message: err.message });
       setLocationOk(false);
       if (!err) return;
       if (err.code === 1) {
@@ -676,17 +681,21 @@ function DriverPageContent() {
     }
 
     async function refreshLocation() {
+      logDebug('refreshLocation');
       try {
         await safeGetCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
       } catch (err1) {
+        logDebug('refreshLocation highAccuracy failed', err1 && err1.message);
         try {
           await safeGetCurrentPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
         } catch (err2) {
+          logDebug('refreshLocation lowAccuracy failed', err2 && err2.message);
           onGeoError(err2);
         }
       }
     }
 
+    logDebug('location effect start', { loggedIn, hasGeolocation: !!navigator.geolocation, driverId });
     refreshLocation();
     const interval = setInterval(refreshLocation, 10000);
     const fallbackTimeout = setTimeout(() => {
