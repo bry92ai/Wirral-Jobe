@@ -1,0 +1,36 @@
+WIRRAL JOBE - GOOGLE PLAY STORE LISTING
+=========================================
+
+App name
+--------
+Wirral Jobe
+
+Short description (80 characters max)
+---------------------------------------
+Book private hire, airport and local taxi rides across Wirral in seconds.
+
+Full description (4000 characters max)
+----------------------------------------
+Wirral Jobe is the easiest way to book a reliable private hire or airport transfer across the Wirral area.
+
+Whether you need a quick local ride, a trip to the airport, or a return journey, Wirral Jobe connects you with licensed drivers in real time.
+
+For passengers:
+- Book instantly or schedule a future ride
+- Track your driver live from pickup to drop-off
+- Get SMS and push notifications when your driver is on the way, has arrived, and when your journey is complete
+- Pay the £1 booking fee securely with Square
+- Save your favourite pickup and drop-off places
+- See your journey history and rebook with one tap
+
+For drivers:
+- Log in with your driver ID and PIN
+- See live job offers and bids in your zone
+- Accept or decline jobs with one tap
+- Track your queue position in each zone
+- Get directions and job details at a glance
+- Update your status (available, break, offline) and location automatically
+
+Wirral Jobe covers Wirral and surrounding areas, including airport runs to Liverpool John Lennon and Manchester, with clear fixed and metered fare options.
+
+Download now and ride with a local driver you can trust.

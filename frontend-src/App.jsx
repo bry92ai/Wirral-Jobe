@@ -11,6 +11,7 @@ import AdminPage from './pages/AdminPage.jsx';
 import CustomerPage from './pages/CustomerPage.jsx';
 import DriverActionPage from './pages/DriverActionPage.jsx';
 import WalletPayPage from './pages/WalletPayPage.jsx';
+import PrivacyPage from './pages/PrivacyPage.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 const SESSION_KEY = 'wirralCustomerToken';
@@ -71,6 +72,7 @@ export default function App() {
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/driver-action" element={<DriverActionPage />} />
             <Route path="/wallet-pay" element={<WalletPayPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
           </Routes>
         </ErrorBoundary>
       </main>

@@ -1,0 +1,61 @@
+WIRRAL JOBE - GOOGLE PLAY STORE UPLOAD CHECKLIST
+=================================================
+
+What has already been done
+--------------------------
+- Release AAB built and signed: wirraljobe-release-bugfix.aab
+- Privacy policy page created and live: https://wirraljobe.com/privacy
+- Play Store listing text written: see PLAY_STORE_LISTING.txt
+- 512x512 Play Store icon created: _STORE_ASSETS/play_store_icon_512.png
+- 1024x500 feature graphic created: _STORE_ASSETS/feature_graphic_1024x500.png
+
+What YOU still need to do
+-------------------------
+
+1. Deploy the updated backend to Google Apps Script
+   - The latest backend/Code.gs is in this project.
+   - Open your Google Apps Script project or use clasp.
+   - Paste / deploy the new Code.gs as a version.
+   - Make sure the script properties are still set:
+     SPREADSHEET_ID, ADMIN_PASSWORD_HASH (or ADMIN_PASSWORD),
+     TWILIO_*, SQUARE_*, FCM_*, PUBLIC_APP_URL, CLOUDINARY_*,
+     SECURE_LINK_SECRET, SMS_ENABLED
+
+2. Test apktest13 properly
+   - Install wirraljobe-apktest13.apk on an Android device.
+   - Create a customer booking, driver login, accept job, complete journey.
+   - Check SMS, push, and Square payment flow if enabled.
+
+3. Create / open Google Play Console
+   - Go to https://play.google.com/console
+   - Pay the $25 one-time developer fee.
+   - Create a new app called "Wirral Jobe".
+
+4. Upload the AAB to Play Console
+   - In Play Console, go to Testing > Internal testing or Closed testing.
+   - Upload: wirraljobe-release-bugfix.aab
+   - Set version code: 4 (or bump to 5 in android/app/build.gradle before re-signing)
+
+5. Fill in the store listing
+   - App name: Wirral Jobe
+   - Short description: see PLAY_STORE_LISTING.txt
+   - Full description: see PLAY_STORE_LISTING.txt
+   - Privacy policy URL: https://wirraljobe.com/privacy
+   - App icon: _STORE_ASSETS/play_store_icon_512.png
+   - Feature graphic: _STORE_ASSETS/feature_graphic_1024x500.png
+   - Phone screenshots: take 2-8 screenshots on a phone (real or emulator)
+   - Content rating: answer the questionnaire
+
+6. Submit for review
+   - Pick countries (start with UK only).
+   - Complete the data safety form (answer that the app collects location,
+     phone number, name, email, payment info).
+   - Submit to production after internal testing looks good.
+
+Notes
+-----
+- The release AAB was signed with the new keystore at
+  android/app/wirraljobe.keystore. The password is in
+  _DELIVERABLES/wirraljobe-keystore-password.txt.
+- If you already uploaded an AAB with the old keystore and Play App Signing
+  is active, you need to contact Google support to reset the app signing key.
