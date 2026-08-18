@@ -5,6 +5,7 @@ import { FLIGHTPATH_ZONES, findZone, getZoneName } from '../lib/zones.js';
 import { distanceMiles } from '../lib/geo.js';
 import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg, coinIcon } from '../lib/leaflet.js';
 import { startDriverService, stopDriverService } from '../lib/driverService.js';
+import { Geolocation } from '@capacitor/geolocation';
 import logo from '../assets/logo.jpg';
 
 function playOfferSound() {
@@ -369,30 +370,45 @@ function DriverPageContent() {
     if (map && myLocation) map.panTo([myLocation.lat, myLocation.lng]);
   }
 
-  function requestLocation() {
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation is not supported by this browser/device.');
-      return;
-    }
+  async function requestLocation() {
     setLocationError('');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude, accuracy, heading: h } = position.coords;
-        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-        setMyLocation({ lat: latitude, lng: longitude });
-        setLocationOk(true);
-        setLocationError('');
-        lastGpsReadingRef.current = Date.now();
-        if (h != null && !Number.isNaN(h)) setHeading(h);
-      },
-      (err) => {
-        setLocationOk(false);
-        if (err.code === 1) setLocationError('Location access denied. Enable location services in your device settings and tap Loc off.');
-        else if (err.code === 2) setLocationError('Location unavailable. Check that GPS/location services are turned on.');
-        else if (err.code === 3) setLocationError('Location request timed out. Signal may be weak.');
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
+    try {
+      const perm = await Geolocation.requestPermissions();
+      logDebug('requestLocation perm', perm);
+      if (perm && perm.location === 'denied') throw { code: 1, message: 'Location access denied' };
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
+      const { latitude, longitude, accuracy, heading: h } = pos.coords;
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+      setMyLocation({ lat: latitude, lng: longitude });
+      setLocationOk(true);
+      setLocationError('');
+      lastGpsReadingRef.current = Date.now();
+      if (h != null && !Number.isNaN(h)) setHeading(h);
+    } catch (err) {
+      logDebug('requestLocation capacitor failed, falling back', err && (err.message || err.code));
+      if (!navigator.geolocation) {
+        setLocationError('Geolocation is not supported by this browser/device.');
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude, accuracy, heading: h } = position.coords;
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+          setMyLocation({ lat: latitude, lng: longitude });
+          setLocationOk(true);
+          setLocationError('');
+          lastGpsReadingRef.current = Date.now();
+          if (h != null && !Number.isNaN(h)) setHeading(h);
+        },
+        (err) => {
+          setLocationOk(false);
+          if (err.code === 1) setLocationError('Location access denied. Enable location services in your device settings and tap Loc off.');
+          else if (err.code === 2) setLocationError('Location unavailable. Check that GPS/location services are turned on.');
+          else if (err.code === 3) setLocationError('Location request timed out. Signal may be weak.');
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    }
   }
 
   async function acceptOffer(jobId) {
@@ -673,11 +689,28 @@ function DriverPageContent() {
       }
     }
 
-    function safeGetCurrentPosition(options) {
-      return new Promise((resolve, reject) => {
-        if (!navigator.geolocation) return reject({ code: 2, message: 'Geolocation not supported' });
-        navigator.geolocation.getCurrentPosition(resolve, reject, options);
-      });
+    async function safeGetCurrentPosition(options) {
+      try {
+        const perm = await Geolocation.requestPermissions();
+        logDebug('geolocation perm', perm);
+        if (perm && perm.location === 'denied') throw { code: 1, message: 'Location access denied' };
+        const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: options.enableHighAccuracy !== false, timeout: options.timeout || 10000 });
+        logDebug('geolocation capacitor ok', { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy });
+        return {
+          coords: {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: pos.coords.accuracy != null ? pos.coords.accuracy : 0,
+            heading: pos.coords.heading != null ? pos.coords.heading : null
+          }
+        };
+      } catch (capErr) {
+        logDebug('geolocation capacitor failed, falling back', capErr && (capErr.message || capErr.code));
+        return new Promise((resolve, reject) => {
+          if (!navigator.geolocation) return reject({ code: 2, message: 'Geolocation not supported' });
+          navigator.geolocation.getCurrentPosition(resolve, reject, options);
+        });
+      }
     }
 
     async function refreshLocation() {
