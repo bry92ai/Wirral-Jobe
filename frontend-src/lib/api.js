@@ -21,26 +21,32 @@ function apiGetUrl(path) {
 async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = options.signal;
+  function onAbort() { controller.abort(); }
+  if (signal) signal.addEventListener('abort', onAbort);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (err) {
     if (err.name === 'AbortError') {
+      if (signal?.aborted) throw err;
       throw new Error(`Request timed out (${url}). Please check your connection and try again.`);
     }
     throw new Error(`Failed to fetch ${url}: ${err.message || err}`);
   } finally {
     clearTimeout(timeout);
+    if (signal) signal.removeEventListener('abort', onAbort);
   }
 }
 
-export async function api(method, body = {}, extraHeaders = {}) {
+export async function api(method, body = {}, extraHeaders = {}, signal) {
   const auth = extractAuth(extraHeaders);
   const url = apiUrl(method);
   const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...extraHeaders },
     body: JSON.stringify({ action: method, payload: body, auth }),
-    cache: 'no-store'
+    cache: 'no-store',
+    signal
   });
   const data = await res.json().catch(() => null);
   if (!data && !res.ok) throw new Error(`Unexpected response from server (${res.status}). Please try again.`);
@@ -49,7 +55,7 @@ export async function api(method, body = {}, extraHeaders = {}) {
   return data;
 }
 
-export async function apiGet(path, extraHeaders = {}) {
+export async function apiGet(path, extraHeaders = {}, signal) {
   const auth = extractAuth(extraHeaders);
   const url = apiGetUrl(path);
   const parts = path.split('/').filter(Boolean);
@@ -58,7 +64,8 @@ export async function apiGet(path, extraHeaders = {}) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...extraHeaders },
     body: JSON.stringify({ action, payload: {}, auth }),
-    cache: 'no-store'
+    cache: 'no-store',
+    signal
   });
   const data = await res.json().catch(() => null);
   if (!data && !res.ok) throw new Error(`Unexpected response from server (${res.status}). Please try again.`);

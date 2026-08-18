@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, apiGet, apiPatch } from '../lib/api.js';
 import { loadLeaflet, vehicleIcon, divIcon, pickupIconSvg, dropoffIconSvg } from '../lib/leaflet.js';
 import { FLIGHTPATH_ZONES, getZoneName } from '../lib/zones.js';
@@ -16,21 +16,29 @@ export default function AdminPage() {
   const [editForm, setEditForm] = useState({});
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState('');
+  const [mapOpen, setMapOpen] = useState(true);
   const [futureOffers, setFutureOffers] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [bids, setBids] = useState([]);
   const [tariff, setTariff] = useState(null);
+  const [pendingSms, setPendingSms] = useState([]);
   const [selectedDriverIds, setSelectedDriverIds] = useState([]);
   const [bulkLetter, setBulkLetter] = useState('');
   const [bulkCommission, setBulkCommission] = useState('');
   const [bulkStatus, setBulkStatus] = useState('');
   const [jobDetail, setJobDetail] = useState(null);
   const [settleAmounts, setSettleAmounts] = useState({});
+  const [smsTemplates, setSmsTemplates] = useState([]);
   const mapRef = useRef(null);
   const mapObjRef = useRef(null);
   const LRef = useRef(null);
   const markersRef = useRef([]);
   const zoneLabelsRef = useRef([]);
+
+  const openJobs = useMemo(() => jobs.filter(j => j.status !== 'COMPLETE' && j.status !== 'CANCELLED'), [jobs]);
+  const availableDrivers = useMemo(() => drivers.filter(d => d.status === 'AVAILABLE'), [drivers]);
+  const badgeApplications = useMemo(() => applications.filter(a => a.status === 'BADGE_REVIEW'), [applications]);
+  const pendingApplications = useMemo(() => applications.filter(a => a.status === 'PENDING_REVIEW'), [applications]);
 
   function getZoneStyle(feature) {
     const external = feature.properties.external;
@@ -44,18 +52,29 @@ export default function AdminPage() {
     };
   }
 
+  const loadingRef = useRef(false);
+  const abortRef = useRef(null);
+
   async function load() {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const headers = { 'x-admin-token': token };
-      const [j, d, a, fo, al, b, t] = await Promise.all([
-        apiGet('/admin/jobs', headers),
-        apiGet('/admin/drivers', headers),
-        apiGet('/admin/driver-applications', headers),
-        apiGet('/admin/future-offers', headers),
-        apiGet('/admin/audit-log', headers),
-        apiGet('/admin/bids', headers),
-        apiGet('/admin/tariff', headers)
+      const opts = { signal: controller.signal };
+      const [j, d, a, fo, al, b, t, sms] = await Promise.all([
+        apiGet('/admin/jobs', headers, controller.signal),
+        apiGet('/admin/drivers', headers, controller.signal),
+        apiGet('/admin/driver-applications', headers, controller.signal),
+        apiGet('/admin/future-offers', headers, controller.signal),
+        apiGet('/admin/audit-log', headers, controller.signal),
+        apiGet('/admin/bids', headers, controller.signal),
+        apiGet('/admin/tariff', headers, controller.signal),
+        apiGet('/admin/pending-sms', headers, controller.signal)
       ]);
+      if (controller.signal.aborted) return;
       setJobs(j.jobs);
       setDrivers(d.drivers);
       setApplications(a.applications || []);
@@ -63,12 +82,17 @@ export default function AdminPage() {
       setAuditLogs(al.logs || []);
       setBids(b.bids || []);
       setTariff(t.tariff || null);
+      setPendingSms(sms.messages || []);
+      setError('');
     } catch (err) {
+      if (err.name === 'AbortError') return;
       setError(err.message);
       if (err.message.includes('Admin not authenticated')) {
         setToken('');
         localStorage.removeItem('adminToken');
       }
+    } finally {
+      loadingRef.current = false;
     }
   }
 
@@ -99,12 +123,16 @@ export default function AdminPage() {
   useEffect(() => {
     if (!token) return;
     load();
-    const id = setInterval(load, 3000);
-    return () => clearInterval(id);
+    const id = setInterval(load, 10000);
+    return () => {
+      clearInterval(id);
+      if (abortRef.current) abortRef.current.abort();
+    };
   }, [token]);
 
   useEffect(() => {
     setMapError('');
+    if (!mapRef.current) return;
     loadLeaflet().then(L => {
       LRef.current = L;
       const map = L.map(mapRef.current, { zoomControl: false }).setView([53.38, -3.03], 11);
@@ -260,6 +288,16 @@ export default function AdminPage() {
     }
   }
 
+  async function toggleSms(key, enabled) {
+    setError('');
+    try {
+      await api('admin/sms-config', { key, enabled }, { 'x-admin-token': token });
+      setSmsTemplates(prev => prev.map(t => t.key === key ? { ...t, enabled } : t));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function adjustSettle(driverId) {
     setError('');
     const amount = Number(settleAmounts[driverId]?.amount);
@@ -292,6 +330,18 @@ export default function AdminPage() {
 
   function formatCurrency(n) {
     return '£' + Number(n || 0).toFixed(2);
+  }
+
+  function safeLocaleString(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? '—' : d.toLocaleString();
+  }
+
+  function safeLocaleTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? '—' : d.toLocaleTimeString();
   }
 
   function exportCSV(rows, filename) {
@@ -338,16 +388,16 @@ export default function AdminPage() {
         <button onClick={() => { localStorage.removeItem('adminToken'); setToken(''); }}>Log out</button>
       </div>
 
-      <div className="card">
-        <h2>Live map</h2>
+      <details className="wj-admin-section card" open={mapOpen} onToggle={e => { setMapOpen(e.target.open); setTimeout(() => { if (mapObjRef.current) mapObjRef.current.invalidateSize(); }, 60); }}>
+        <summary className="wj-admin-section-title">Live map</summary>
         <div ref={mapRef} className="wj-admin-map" />
         <p className="wj-admin-map-legend">
           Gold car/MPV = open job pickup · Green car/MPV = available driver · Red car/MPV = busy/offline driver
         </p>
-      </div>
+      </details>
 
-      <div className="card">
-        <h2>Add driver</h2>
+      <details className="wj-admin-section card">
+        <summary className="wj-admin-section-title">Add driver</summary>
         <form onSubmit={addDriver}>
           <div className="row">
             <div className="form-group">
@@ -415,18 +465,19 @@ export default function AdminPage() {
           </div>
           <button type="submit">Add driver</button>
         </form>
-      </div>
+      </details>
 
-      <h2>Open jobs</h2>
-      {jobs.filter(j => j.status !== 'COMPLETE' && j.status !== 'CANCELLED').length === 0 && <p>No open jobs.</p>}
-      {jobs.filter(j => j.status !== 'COMPLETE' && j.status !== 'CANCELLED').map(job => (
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">Open jobs</summary>
+      {openJobs.length === 0 && <p>No open jobs.</p>}
+      {openJobs.map(job => (
         <div key={job.jobId} className="card">
           <p><strong>{job.jobId}</strong> <span className={`badge status-${job.status}`}>{job.status}</span></p>
           <p>{job.pickupAddress} → {job.dropoffAddress}</p>
           <p>Fare: {formatCurrency(job.fare)} | {job.vehicleType} | {job.customerPhone}</p>
           <div className="row">
             <button className="secondary" onClick={() => setJobDetail(job)}>Details</button>
-            {job.status === 'NEW' && drivers.filter(d => d.status === 'AVAILABLE').map(d => (
+            {job.status === 'NEW' && availableDrivers.map(d => (
               <button key={d.id} onClick={() => assign(job.jobId, d.id)}>Assign {d.name}</button>
             ))}
           </div>
@@ -434,9 +485,11 @@ export default function AdminPage() {
         </div>
       ))}
 
-      <h2>Badge checks</h2>
-      {applications.filter(application => application.status === 'BADGE_REVIEW').length === 0 && <p>No badge photos awaiting review.</p>}
-      {applications.filter(application => application.status === 'BADGE_REVIEW').map(application => (
+      </details>
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">Badge checks</summary>
+      {badgeApplications.length === 0 && <p>No badge photos awaiting review.</p>}
+      {badgeApplications.map(application => (
         <div key={application.id} className="card wj-driver-application">
           <div><p><strong>New driver badge</strong> <span className="badge status-NEW">Awaiting badge check</span></p><p>Review the badge before allowing the applicant into the sign-up process.</p></div>
           <a href={application.badgeUrl} target="_blank" rel="noreferrer" className="btn secondary">View badge</a>
@@ -447,9 +500,11 @@ export default function AdminPage() {
         </div>
       ))}
 
-      <h2>Driver applications</h2>
-      {applications.filter(application => application.status === 'PENDING_REVIEW').length === 0 && <p>No completed driver applications awaiting approval.</p>}
-      {applications.filter(application => application.status === 'PENDING_REVIEW').map(application => (
+      </details>
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">Driver applications</summary>
+      {pendingApplications.length === 0 && <p>No completed driver applications awaiting approval.</p>}
+      {pendingApplications.map(application => (
         <div key={application.id} className="card wj-driver-application">
           <div>
             <p><strong>{application.name}</strong> <span className="badge status-NEW">Awaiting approval</span></p>
@@ -464,7 +519,9 @@ export default function AdminPage() {
         </div>
       ))}
 
-      <h2>Bulk driver tools</h2>
+      </details>
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">Bulk driver tools</summary>
       <div className="card">
         <div className="row">
           <div className="form-group">
@@ -496,7 +553,9 @@ export default function AdminPage() {
         <button className="secondary" style={{ marginLeft: 8 }} onClick={() => exportCSV(drivers, `drivers-${new Date().toISOString().slice(0,10)}.csv`)}>Export drivers CSV</button>
       </div>
 
-      <h2>Drivers</h2>
+      </details>
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">Drivers</summary>
       {drivers.map(d => (
         <div key={d.id} className="card" style={{ marginBottom: 8 }}>
           {editingId === d.id ? (
@@ -556,7 +615,7 @@ export default function AdminPage() {
               </p>
               {d.last_lat != null && d.last_lng != null && (
                 <p style={{ fontSize: '0.8rem' }}>
-                  Last location: lat {d.last_lat.toFixed(4)}, lng {d.last_lng.toFixed(4)} at {new Date(d.last_location_at).toLocaleTimeString()}
+                  Last location: lat {d.last_lat.toFixed(4)}, lng {d.last_lng.toFixed(4)} at {safeLocaleTime(d.last_location_at)}
                 </p>
               )}
             </div>
@@ -564,28 +623,34 @@ export default function AdminPage() {
         </div>
       ))}
 
-      <h2>Future bookings</h2>
+      </details>
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">Future bookings</summary>
       {futureOffers.length === 0 && <p>No active future offers.</p>}
       {futureOffers.map(fo => (
         <div key={fo.jobId} className="card">
           <p><strong>{fo.jobId}</strong> <span className={`badge status-${fo.status}`}>{fo.status}</span></p>
           <p>{fo.pickupAddress} → {fo.dropoffAddress}</p>
-          <p>Pickup {fo.pickupTime ? new Date(fo.pickupTime).toLocaleString() : '—'} · Fare {formatCurrency(fo.fare)}</p>
-          <p>Offer stage: <strong>{fo.currentLetter || '—'}</strong> · Offered to: {fo.currentDriverId || '—'} · Expires {fo.expiresAt ? new Date(fo.expiresAt).toLocaleTimeString() : '—'}</p>
+          <p>Pickup {safeLocaleString(fo.pickupTime)} · Fare {formatCurrency(fo.fare)}</p>
+          <p>Offer stage: <strong>{fo.currentLetter || '—'}</strong> · Offered to: {fo.currentDriverId || '—'} · Expires {safeLocaleTime(fo.expiresAt)}</p>
           {fo.status === 'SCHEDULED' && fo.currentDriverId && <button onClick={() => dispatchFutureOffer(fo.jobId)}>Dispatch now</button>}
         </div>
       ))}
 
-      <h2>Bids board</h2>
+      </details>
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">Bids board</summary>
       {bids.length === 0 && <p>No bids.</p>}
       {bids.map((b, i) => (
         <div key={i} className="card">
           <p><strong>{b.job_id}</strong> <span className="badge status-NEW">{b.status}</span></p>
-          <p>Driver {b.driver_id} bid {formatCurrency(b.amount)} · {b.created_at ? new Date(b.created_at).toLocaleString() : '—'}</p>
+          <p>Driver {b.driver_id} bid {formatCurrency(b.amount)} · {safeLocaleString(b.created_at)}</p>
         </div>
       ))}
 
-      <h2>Tariff editor</h2>
+      </details>
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">Tariff editor</summary>
       <div className="card">
         {tariff ? (
           <form onSubmit={saveTariff}>
@@ -611,7 +676,27 @@ export default function AdminPage() {
         ) : <p>Loading…</p>}
       </div>
 
-      <h2>Audit log</h2>
+      </details>
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">SMS messages</summary>
+      <div className="card">
+        {pendingSms.length === 0 ? <p>No upcoming SMS messages.</p> : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {pendingSms.map((m, i) => (
+              <div key={i} style={{ borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
+                <p style={{ margin: '0 0 4px', fontSize: '0.75rem', color: 'var(--gold)' }}>
+                  {safeLocaleString(m.scheduledAt)} · {m.jobId} · {m.recipientName} {m.phone ? '(' + m.phone + ')' : ''}
+                  {!m.enabled && <span style={{ color: 'var(--cream-dim)', marginLeft: 8 }}>(template disabled)</span>}
+                </p>
+                <p style={{ margin: 0, fontSize: '0.85rem', whiteSpace: 'pre-wrap' }}>{m.body}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      </details>
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">Audit log</summary>
       <div className="card" style={{ maxHeight: 400, overflow: 'auto' }}>
         {auditLogs.length === 0 && <p>No recent events.</p>}
         {auditLogs.length > 0 && (
@@ -619,19 +704,22 @@ export default function AdminPage() {
             <thead><tr style={{ textAlign: 'left' }}><th>Time</th><th>Actor</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>
             <tbody>
               {auditLogs.map(log => (
-                <tr key={log.id}><td>{log.created_at ? new Date(log.created_at).toLocaleString() : '—'}</td><td>{log.actor_type} {log.actor_id}</td><td>{log.action}</td><td>{log.entity_type} {log.entity_id}</td><td><pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(log.metadata)}</pre></td></tr>
+                <tr key={log.id}><td>{safeLocaleString(log.created_at)}</td><td>{log.actor_type} {log.actor_id}</td><td>{log.action}</td><td>{log.entity_type} {log.entity_id}</td><td><pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(log.metadata)}</pre></td></tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
 
-      <h2>Export</h2>
+      </details>
+      <details className="wj-admin-section">
+      <summary className="wj-admin-section-title">Export</summary>
       <div className="card">
         <button className="secondary" onClick={() => exportCSV(jobs, `jobs-${new Date().toISOString().slice(0,10)}.csv`)}>Export jobs CSV</button>
         <button className="secondary" style={{ marginLeft: 8 }} onClick={() => exportCSV(drivers, `drivers-${new Date().toISOString().slice(0,10)}.csv`)}>Export drivers CSV</button>
       </div>
 
+      </details>
       {jobDetail && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setJobDetail(null)}>
           <div className="card" style={{ maxWidth: 600, maxHeight: '80vh', overflow: 'auto', margin: 20 }} onClick={e => e.stopPropagation()}>
@@ -640,15 +728,15 @@ export default function AdminPage() {
             <p>{jobDetail.pickupAddress} → {jobDetail.dropoffAddress}</p>
             <p>Customer: {jobDetail.customerName} · {jobDetail.customerPhone}</p>
             <p>Fare: {formatCurrency(jobDetail.fare)} · Vehicle: {jobDetail.vehicleType}</p>
-            <p>Pickup time: {jobDetail.pickupTime ? new Date(jobDetail.pickupTime).toLocaleString() : '—'}</p>
+            <p>Pickup time: {safeLocaleString(jobDetail.pickupTime)}</p>
             <h4>Timeline</h4>
             <ul>
-              <li>Created: {jobDetail.createdAt ? new Date(jobDetail.createdAt).toLocaleString() : '—'}</li>
-              {jobDetail.onWayAt && <li>On way: {new Date(jobDetail.onWayAt).toLocaleString()}</li>}
-              {jobDetail.arrivedAt && <li>Arrived: {new Date(jobDetail.arrivedAt).toLocaleString()}</li>}
-              {jobDetail.pobAt && <li>Passenger on board: {new Date(jobDetail.pobAt).toLocaleString()}</li>}
-              {jobDetail.completedAt && <li>Completed: {new Date(jobDetail.completedAt).toLocaleString()}</li>}
-              {jobDetail.cancelledAt && <li>Cancelled: {new Date(jobDetail.cancelledAt).toLocaleString()}</li>}
+              <li>Created: {safeLocaleString(jobDetail.createdAt)}</li>
+              {jobDetail.onWayAt && <li>On way: {safeLocaleString(jobDetail.onWayAt)}</li>}
+              {jobDetail.arrivedAt && <li>Arrived: {safeLocaleString(jobDetail.arrivedAt)}</li>}
+              {jobDetail.pobAt && <li>Passenger on board: {safeLocaleString(jobDetail.pobAt)}</li>}
+              {jobDetail.completedAt && <li>Completed: {safeLocaleString(jobDetail.completedAt)}</li>}
+              {jobDetail.cancelledAt && <li>Cancelled: {safeLocaleString(jobDetail.cancelledAt)}</li>}
             </ul>
             <button onClick={() => setJobDetail(null)}>Close</button>
           </div>
