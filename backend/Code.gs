@@ -41,7 +41,7 @@ const AIRPORTS = [
   { name: 'Manchester', lat: 53.3537, lng: -2.2740, carFare: 75, mpvFare: 90 }
 ];
 
-const JOB_HEADERS = ['created_at','id','status','driver_id','customer_name','customer_phone','pickup_address','dropoff_address','pickup_lat','pickup_lng','dropoff_lat','dropoff_lng','pickup_time','vehicle_type','miles','fare','booking_fee','payment_id','payment_status','commission_rate','commission_amount','tracking_token','on_way_at','arrived_at','pob_at','completed_at','customer_id','passengers','notes','return_job_id','cancelled_at','updated_at','journey_pin'];
+const JOB_HEADERS = ['created_at','id','status','driver_id','customer_name','customer_phone','pickup_address','dropoff_address','pickup_lat','pickup_lng','dropoff_lat','dropoff_lng','pickup_time','vehicle_type','miles','fare','booking_fee','payment_id','payment_status','commission_rate','commission_amount','tracking_token','on_way_at','arrived_at','pob_at','completed_at','customer_id','passengers','notes','return_job_id','cancelled_at','updated_at'];
 const DRIVER_HEADERS = ['id','name','phone','pin','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','status','zone','last_lat','last_lng','last_location_at','commission_rate','settle_balance','available_since','created_at','updated_at','pin_hash','fcm_token'];
 const OFFER_HEADERS = ['jobId','currentDriverId','offeredDrivers','expiresAt','pickupLat','pickupLng'];
 const BID_HEADERS = ['created_at','job_id','driver_id','amount','status'];
@@ -64,13 +64,6 @@ const SMS_TEMPLATES = [
     jobType: "Ride now",
     message: "Driver allocated + on the way",
     template: "Good news \u2014 {driver_first_name} is your driver for booking {booking_reference} and is now on the way. Vehicle: {vehicle_make_model}. Registration: {vehicle_registration}. Estimated arrival: {eta_minutes} minutes. Track your driver: {tracking_link}"
-  },
-  {
-    key: "customer-ride-now-driver-arrived-journey-pin",
-    recipient: "Customer",
-    jobType: "Ride now",
-    message: "Driver arrived + journey PIN",
-    template: "Your Wirral Jobe driver has arrived at the pickup point. Your journey PIN is {journey_pin}. Please give this PIN to your driver before the journey begins. Booking reference: {booking_reference}."
   },
   {
     key: "customer-ride-now-journey-completed",
@@ -691,7 +684,7 @@ function formatSmsTime(iso) {
   if (isNaN(d.getTime())) return '';
   return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
-function generateJourneyPin() { return String(Math.floor(1000 + Math.random() * 9000)); }
+
 
 function publicAppUrl() { return PropertiesService.getScriptProperties().getProperty('PUBLIC_APP_URL') || ''; }
 function buildTrackingLink(token) { const base = publicAppUrl(); return base ? base + '/track/' + encodeURIComponent(token) : ''; }
@@ -791,7 +784,6 @@ function customerSmsData(job, extra) {
     vehicle_registration: '',
     eta_minutes: '',
     tracking_link: '',
-    journey_pin: '',
     booking_link: buildBookingLink(job),
     cancelled_scope: 'The journey',
     remaining_leg_status: ''
@@ -867,11 +859,7 @@ function sendDriverAllocatedSms(job, driver) {
 }
 
 function sendDriverArrivedSms(job) {
-  const key = customerJobTypeKey('driver-arrived-journey-pin', job);
-  if (!getSmsTemplate(key)) return false;
-  const pin = job.journey_pin || generateJourneyPin();
-  if (!job.journey_pin) updateJob(job.id, { journey_pin: pin });
-  return sendCustomerSms(job, key, { journey_pin: pin });
+  return false;
 }
 
 function sendJourneyCompletedSms(job) {
