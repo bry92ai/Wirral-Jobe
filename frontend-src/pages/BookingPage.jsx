@@ -531,7 +531,7 @@ export default function BookingPage() {
       if (!returnTrip) {
         const outbound = await api('booking', booking);
         if (outbound.error) throw new Error(outbound.error);
-        setResult(outbound);
+        setResult({ ...outbound, jobId: outbound.pendingBookingId });
         setClientSecret(outbound.clientSecret || null);
         setPaymentTarget('outbound');
         navigateToScreen('payment');
@@ -571,15 +571,15 @@ export default function BookingPage() {
         const pair = await api('booking/return-pair', { outbound: booking, return: returnBooking });
         if (pair.error) throw new Error(pair.error);
         setResult({
-          jobId: pair.outbound.jobId,
-          outboundJobId: pair.outbound.jobId,
-          returnJobId: pair.return.jobId,
+          jobId: pair.outbound.pendingBookingId,
+          outboundJobId: pair.outbound.pendingBookingId,
+          returnJobId: pair.return.pendingBookingId,
           fare: (pair.outbound.fare || 0) + (pair.return.fare || 0),
           bookingFee: (pair.outbound.bookingFee || 0) + (pair.return.bookingFee || 0),
           clientSecret: pair.outbound.clientSecret || null,
           trackingToken: pair.outbound.trackingToken
         });
-        setReturnResult(pair.return);
+        setReturnResult({ ...pair.return, jobId: pair.return.pendingBookingId });
         setClientSecret(pair.outbound.clientSecret || null);
         setPaymentTarget('pair');
         navigateToScreen('payment');
@@ -625,8 +625,8 @@ export default function BookingPage() {
       customerNotes
     });
     if (returnData.error) throw new Error(returnData.error);
-    setReturnResult(returnData);
-    setResult(returnData);
+    setReturnResult({ ...returnData, jobId: returnData.pendingBookingId });
+    setResult({ ...returnData, jobId: returnData.pendingBookingId });
     setClientSecret(returnData.clientSecret || null);
     setPaymentTarget('return');
   }
@@ -636,13 +636,13 @@ export default function BookingPage() {
     setError(''); setLoading(true);
     try {
       if (paymentTarget === 'pair' && returnResult) {
-        const confirm = await api('booking/confirm-pair', { outboundJobId: result.outboundJobId, returnJobId: returnResult.jobId, sourceId });
+        const confirm = await api('booking/confirm-pair', { outboundPendingBookingId: result.outboundJobId, returnPendingBookingId: returnResult.jobId, sourceId });
         if (confirm.error) throw new Error(confirm.error);
         navigateToScreen('success');
         return;
       }
 
-      const confirm = await api('booking/confirm', { jobId: result.jobId, sourceId });
+      const confirm = await api('booking/confirm', { pendingBookingId: result.jobId, sourceId });
       if (confirm.error) throw new Error(confirm.error);
       navigateToScreen('success');
     } catch (err) {
@@ -1009,9 +1009,9 @@ export default function BookingPage() {
                 onConfirm={confirmPayment}
                 loading={loading}
                 error={error}
-                jobId={paymentTarget !== 'pair' ? result.jobId : undefined}
-                outboundJobId={paymentTarget === 'pair' ? result.outboundJobId : undefined}
-                returnJobId={paymentTarget === 'pair' ? returnResult?.jobId : undefined}
+                pendingBookingId={paymentTarget !== 'pair' ? result.jobId : undefined}
+                outboundPendingBookingId={paymentTarget === 'pair' ? result.outboundJobId : undefined}
+                returnPendingBookingId={paymentTarget === 'pair' ? returnResult?.jobId : undefined}
               />
             ) : (
               <p className="error">No booking data. Please go back and try again.</p>

@@ -9,9 +9,9 @@ export default function WalletPayPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const jobId = params.get('jobId') || '';
-  const outboundJobId = params.get('outboundJobId') || '';
-  const returnJobId = params.get('returnJobId') || '';
+  const pendingBookingId = params.get('pendingBookingId') || '';
+  const outboundPendingBookingId = params.get('outboundPendingBookingId') || '';
+  const returnPendingBookingId = params.get('returnPendingBookingId') || '';
   const bookingFee = Number(params.get('bookingFee')) || 0;
   const fare = Number(params.get('fare')) || 0;
 
@@ -19,14 +19,22 @@ export default function WalletPayPage() {
     setLoading(true);
     setError('');
     try {
-      if (outboundJobId && returnJobId) {
-        await api('booking/confirm-pair', { outboundJobId, returnJobId, sourceId });
-      } else if (jobId) {
-        await api('booking/confirm', { jobId, sourceId });
+      if (outboundPendingBookingId && returnPendingBookingId) {
+        await api('booking/confirm-pair', { outboundPendingBookingId, returnPendingBookingId, sourceId });
+      } else if (pendingBookingId) {
+        await api('booking/confirm', { pendingBookingId, sourceId });
       } else {
-        throw new Error('Missing job information');
+        throw new Error('Missing booking information');
       }
       setDone(true);
+      // Notify the parent tab on web so the booking app can proceed to the success screen.
+      if (window.opener) {
+        try {
+          window.opener.postMessage({ type: 'wirral-payment-success' }, window.location.origin);
+        } catch (e) {
+          // Ignore cross-origin postMessage errors
+        }
+      }
     } catch (err) {
       setError(err.message || 'Payment could not be confirmed. Please try again.');
     } finally {
@@ -66,9 +74,9 @@ export default function WalletPayPage() {
               onConfirm={handleConfirm}
               error={error}
               loading={loading}
-              jobId={jobId}
-              outboundJobId={outboundJobId}
-              returnJobId={returnJobId}
+              pendingBookingId={pendingBookingId}
+              outboundPendingBookingId={outboundPendingBookingId}
+              returnPendingBookingId={returnPendingBookingId}
             />
           </>
         )}

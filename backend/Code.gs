@@ -839,6 +839,8 @@ function sendCustomerSms(job, key, extra) {
 }
 
 function sendDriverOfferSms(job, driver) {
+  // ASAP jobs are notified via push only; SMS driver offers are for future bookings.
+  if (!isFutureBooking(job)) return false;
   const key = driverOfferKey(job);
   const extra = {};
   if (job.return_job_id) {
@@ -1664,6 +1666,33 @@ function updateJob(id, updates) {
   return true;
 }
 
+// ---------- Pending bookings (created only after payment succeeds) ----------
+
+function getPendingBookingsSheet() { return ensureSheet('PendingBookings', JOB_HEADERS); }
+function getPendingBookings() { return rowsToObjects(getPendingBookingsSheet(), JOB_HEADERS); }
+function findPendingJobById(id) { return getPendingBookings().find(j => j.id === id); }
+function deletePendingJobById(id) {
+  const sheet = getPendingBookingsSheet();
+  const idx = findRowIndex(sheet, row => row[1] === id);
+  if (idx >= 0) sheet.deleteRow(idx);
+}
+function appendPendingBooking(valuesMap) {
+  const sheet = getPendingBookingsSheet();
+  const values = JOB_HEADERS.map(h => valuesMap[h] !== undefined ? valuesMap[h] : '');
+  sheet.appendRow(values);
+  SpreadsheetApp.flush();
+}
+function movePendingToJob(id, updates) {
+  const pending = findPendingJobById(id);
+  if (!pending) throw new Error('Pending booking not found');
+  const jobData = {};
+  JOB_HEADERS.forEach(h => jobData[h] = pending[h] !== undefined ? pending[h] : '');
+  Object.keys(updates).forEach(k => { if (updates[k] !== undefined) jobData[k] = updates[k]; });
+  appendJob(jobData);
+  deletePendingJobById(id);
+  return findJobById(id);
+}
+
 // ---------- Booking ----------
 
 function allocateImmediateJob(jobId) {
@@ -1719,12 +1748,14 @@ function createBooking(body) {
     accessibility: p.accessibility || '',
     customerNotes: p.customerNotes || ''
   };
-  Logger.log('createBooking: jobId=%s isFuture=%s paymentRequired=%s', jobId, isFutureBooking, paymentRequired);
+  Logger.log('createBooking: pendingBookingId=%s paymentRequired=%s', jobId, paymentRequired);
 
-  appendJob({
+  // Store the booking as pending until the customer successfully pays the £1 fee.
+  // This prevents failed / abandoned payments from creating real jobs.
+  appendPendingBooking({
     created_at: new Date().toISOString(),
     id: jobId,
-    status: isFutureBooking ? 'SCHEDULED' : 'NEW',
+    status: 'PENDING_PAYMENT',
     driver_id: '',
     customer_name: customerName,
     customer_phone: customerPhone,
@@ -1750,39 +1781,59 @@ function createBooking(body) {
     updated_at: new Date().toISOString()
   });
 
-  if (!isFutureBooking && !paymentRequired) {
-    Logger.log('createBooking: starting offer immediately for job %s', jobId);
-    try { startOffer(jobId, Number(p.pickupLat) || 0, Number(p.pickupLng) || 0); } catch (e) { Logger.log('startOffer error (non-fatal): %s', e.message); }
-  }
-
-  if (isFutureBooking) {
-    Logger.log('createBooking: starting future offer cycle for job %s', jobId);
-    createFutureOffer(jobId, Number(p.pickupLat) || 0, Number(p.pickupLng) || 0);
-  }
-
-  writeAudit(customer ? 'customer' : 'guest', customer ? customer.id : customerPhone, 'booking_created', 'job', jobId, { status: isFutureBooking ? 'SCHEDULED' : 'NEW' });
-  return { ok: true, jobId, fare, bookingFee, trackingToken: token, clientSecret: squarePaymentsEnabled() ? 'square' : null };
+  writeAudit(customer ? 'customer' : 'guest', customer ? customer.id : customerPhone, 'booking_pending_payment', 'pendingBooking', jobId, { paymentRequired });
+  return { ok: true, pendingBookingId: jobId, fare, bookingFee, trackingToken: token, clientSecret: paymentRequired ? 'square' : null };
 }
 
 function confirmBooking(body) {
-  const { jobId, sourceId } = body || {};
-  Logger.log('confirmBooking: jobId=%s sourceId=%s', jobId, sourceId ? 'present' : 'missing');
-  if (!jobId) throw new Error('Missing jobId');
-  const job = findJobById(jobId);
-  if (!job) throw new Error('Job not found');
-  if (job.payment_status === 'BOOKING_FEE_PAID') return { ok: true, jobId, fare: Number(job.fare), bookingFee: Number(job.booking_fee), trackingToken: job.tracking_token };
-  if (squarePaymentsEnabled()) {
-    const payment = createSquarePayment(job, sourceId);
-    updateJob(jobId, { payment_id: payment.id, payment_status: 'BOOKING_FEE_PAID', updated_at: new Date().toISOString() });
-    writeAudit('customer', job.customer_id || job.customer_phone, 'booking_fee_paid', 'job', jobId, { provider: 'square', paymentId: payment.id, amount: Number(job.booking_fee) });
-    sendBookingConfirmedSms(job);
-    allocateImmediateJob(jobId);
-  } else {
-    updateJob(jobId, { payment_status: 'BOOKING_FEE_PAID', updated_at: new Date().toISOString() });
-    sendBookingConfirmedSms(job);
-    allocateImmediateJob(jobId);
+  const { pendingBookingId, sourceId } = body || {};
+  Logger.log('confirmBooking: pendingBookingId=%s sourceId=%s', pendingBookingId, sourceId ? 'present' : 'missing');
+  if (!pendingBookingId) throw new Error('Missing pending booking ID');
+
+  // If the booking was already confirmed, return the existing job.
+  const existingJob = findJobById(pendingBookingId);
+  if (existingJob) {
+    if (existingJob.payment_status === 'BOOKING_FEE_PAID') {
+      return { ok: true, jobId: pendingBookingId, fare: Number(existingJob.fare), bookingFee: Number(existingJob.booking_fee), trackingToken: existingJob.tracking_token };
+    }
+    throw new Error('This booking has already been processed. Please create a new booking.');
   }
-  return { ok: true, jobId, fare: Number(job.fare), bookingFee: Number(job.booking_fee), trackingToken: job.tracking_token };
+
+  const pending = findPendingJobById(pendingBookingId);
+  if (!pending) throw new Error('Booking not found. It may have expired.');
+
+  const pickupTime = new Date(pending.pickup_time).getTime();
+  const isAirport = calculateAirportFare({ pickupLat: Number(pending.pickup_lat), pickupLng: Number(pending.pickup_lng), dropoffLat: Number(pending.dropoff_lat), dropoffLng: Number(pending.dropoff_lng), vehicleType: pending.vehicle_type || 'car' }) != null;
+  const isFutureBooking = pickupTime > Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
+  const status = isFutureBooking || isAirport ? 'SCHEDULED' : 'NEW';
+
+  let paymentId = '';
+  if (squarePaymentsEnabled()) {
+    const payment = createSquarePayment(pending, sourceId);
+    paymentId = payment.id;
+  }
+
+  const now = new Date().toISOString();
+  const job = movePendingToJob(pendingBookingId, {
+    status,
+    payment_id: paymentId,
+    payment_status: 'BOOKING_FEE_PAID',
+    updated_at: now
+  });
+  if (!job) throw new Error('Could not create booking. Please try again.');
+
+  writeAudit('customer', job.customer_id || job.customer_phone, 'booking_confirmed', 'job', pendingBookingId, { provider: squarePaymentsEnabled() ? 'square' : 'none', paymentId: paymentId || '', amount: Number(job.booking_fee) });
+  sendBookingConfirmedSms(job);
+
+  if (isFutureBooking || isAirport) {
+    Logger.log('confirmBooking: starting future offer cycle for job %s', pendingBookingId);
+    createFutureOffer(pendingBookingId, Number(job.pickup_lat), Number(job.pickup_lng));
+  } else {
+    Logger.log('confirmBooking: starting offer immediately for job %s', pendingBookingId);
+    allocateImmediateJob(pendingBookingId);
+  }
+
+  return { ok: true, jobId: pendingBookingId, fare: Number(job.fare), bookingFee: Number(job.booking_fee), trackingToken: job.tracking_token };
 }
 
 function deleteJobById(id) {
@@ -1805,44 +1856,49 @@ function createReturnPair(body) {
   try {
     returnResult = createBooking(returnPayload);
   } catch (err) {
-    Logger.log('createReturnPair: return failed, rolling back outbound job %s: %s', outboundResult.jobId, err.message);
-    deleteJobById(outboundResult.jobId);
+    Logger.log('createReturnPair: return failed, rolling back outbound pending booking %s: %s', outboundResult.pendingBookingId, err.message);
+    deletePendingJobById(outboundResult.pendingBookingId);
     throw new Error('Could not create return booking: ' + err.message);
   }
   return { ok: true, outbound: outboundResult, return: returnResult };
 }
 
 function confirmReturnPair(body) {
-  const { outboundJobId, returnJobId, sourceId } = body || {};
-  Logger.log('confirmReturnPair: outbound=%s return=%s', outboundJobId, returnJobId);
-  if (!outboundJobId || !returnJobId) throw new Error('Missing job IDs');
-  const outbound = findJobById(outboundJobId);
-  const ret = findJobById(returnJobId);
-  if (!outbound || !ret) throw new Error('Job not found');
-  if (outbound.payment_status === 'BOOKING_FEE_PAID' && ret.payment_status === 'BOOKING_FEE_PAID') {
-    return { ok: true, outboundJobId, returnJobId, fare: Number(outbound.fare) + Number(ret.fare), bookingFee: Number(outbound.booking_fee) + Number(ret.booking_fee) };
+  const { outboundPendingBookingId, returnPendingBookingId, sourceId } = body || {};
+  Logger.log('confirmReturnPair: outbound=%s return=%s', outboundPendingBookingId, returnPendingBookingId);
+  if (!outboundPendingBookingId || !returnPendingBookingId) throw new Error('Missing pending booking IDs');
+
+  // Idempotency: if both jobs already exist and are paid, return success.
+  const existingOutbound = findJobById(outboundPendingBookingId);
+  const existingReturn = findJobById(returnPendingBookingId);
+  if (existingOutbound && existingReturn && existingOutbound.payment_status === 'BOOKING_FEE_PAID' && existingReturn.payment_status === 'BOOKING_FEE_PAID') {
+    return { ok: true, outboundJobId: outboundPendingBookingId, returnJobId: returnPendingBookingId, fare: Number(existingOutbound.fare) + Number(existingReturn.fare), bookingFee: Number(existingOutbound.booking_fee) + Number(existingReturn.booking_fee) };
   }
+
+  const outbound = findPendingJobById(outboundPendingBookingId);
+  const ret = findPendingJobById(returnPendingBookingId);
+  if (!outbound || !ret) throw new Error('Booking not found. It may have expired.');
+
+  let paymentId = '';
   if (squarePaymentsEnabled()) {
     const totalBookingFee = (Number(outbound.booking_fee) || 0) + (Number(ret.booking_fee) || 0);
-    const payment = createSquarePaymentForAmount(totalBookingFee, sourceId, outboundJobId + '-' + returnJobId, 'Booking fees for ' + outboundJobId + ' and ' + returnJobId);
-    const now = new Date().toISOString();
-    updateJob(outboundJobId, { payment_id: payment.id, payment_status: 'BOOKING_FEE_PAID', updated_at: now });
-    updateJob(returnJobId, { payment_id: payment.id, payment_status: 'BOOKING_FEE_PAID', updated_at: now });
-    writeAudit('customer', outbound.customer_id || outbound.customer_phone, 'booking_fee_paid', 'job', outboundJobId + ',' + returnJobId, { provider: 'square', paymentId: payment.id, amount: totalBookingFee });
-    sendBookingConfirmedSms(outbound);
-    sendBookingConfirmedSms(ret);
-    allocateImmediateJob(outboundJobId);
-    allocateImmediateJob(returnJobId);
-  } else {
-    const now = new Date().toISOString();
-    updateJob(outboundJobId, { payment_status: 'BOOKING_FEE_PAID', updated_at: now });
-    updateJob(returnJobId, { payment_status: 'BOOKING_FEE_PAID', updated_at: now });
-    sendBookingConfirmedSms(outbound);
-    sendBookingConfirmedSms(ret);
-    allocateImmediateJob(outboundJobId);
-    allocateImmediateJob(returnJobId);
+    const payment = createSquarePaymentForAmount(totalBookingFee, sourceId, outboundPendingBookingId + '-' + returnPendingBookingId, 'Booking fees for ' + outboundPendingBookingId + ' and ' + returnPendingBookingId);
+    paymentId = payment.id;
   }
-  return { ok: true, outboundJobId, returnJobId, fare: Number(outbound.fare) + Number(ret.fare), bookingFee: Number(outbound.booking_fee) + Number(ret.booking_fee) };
+
+  const now = new Date().toISOString();
+  const outboundJob = movePendingToJob(outboundPendingBookingId, { status: 'SCHEDULED', payment_id: paymentId, payment_status: 'BOOKING_FEE_PAID', updated_at: now });
+  const returnJob = movePendingToJob(returnPendingBookingId, { status: 'SCHEDULED', payment_id: paymentId, payment_status: 'BOOKING_FEE_PAID', updated_at: now });
+  if (!outboundJob || !returnJob) throw new Error('Could not confirm both journeys. Please try again.');
+
+  writeAudit('customer', outboundJob.customer_id || outboundJob.customer_phone, 'booking_confirmed', 'job', outboundPendingBookingId + ',' + returnPendingBookingId, { provider: squarePaymentsEnabled() ? 'square' : 'none', paymentId: paymentId || '', amount: Number(outboundJob.booking_fee) + Number(returnJob.booking_fee) });
+  sendBookingConfirmedSms(outboundJob);
+  sendBookingConfirmedSms(returnJob);
+
+  createFutureOffer(outboundPendingBookingId, Number(outboundJob.pickup_lat), Number(outboundJob.pickup_lng));
+  createFutureOffer(returnPendingBookingId, Number(returnJob.pickup_lat), Number(returnJob.pickup_lng));
+
+  return { ok: true, outboundJobId: outboundPendingBookingId, returnJobId: returnPendingBookingId, fare: Number(outboundJob.fare) + Number(returnJob.fare), bookingFee: Number(outboundJob.booking_fee) + Number(returnJob.booking_fee) };
 }
 
 // ---------- Status ----------
@@ -2026,6 +2082,10 @@ function advanceOffers() {
       } else {
         offered.push(next.id);
         sheet.getRange(idx, 2, 1, 4).setValues([[next.id, JSON.stringify(offered), Date.now() + 60000, offer.pickupLat]]);
+        const job = findJobById(offer.jobId);
+        if (job) {
+          sendPushToDriver(next.id, 'New Job Offer!', job.pickup_address + ' → ' + job.dropoff_address + ' £' + Number(job.fare).toFixed(2), { route: '/driver', type: 'job_offer', jobId: offer.jobId });
+        }
       }
     } catch (e) {
       Logger.log('advanceOffers error for job %s: %s', offer && offer.jobId, e.message || e);

@@ -13,9 +13,9 @@ export default function PaymentForm({
   onConfirm,
   error,
   loading,
-  jobId,
-  outboundJobId,
-  returnJobId
+  pendingBookingId,
+  outboundPendingBookingId,
+  returnPendingBookingId
 }) {
   const [ready, setReady] = useState(false);
   const [payLoading, setPayLoading] = useState(false);
@@ -33,7 +33,8 @@ export default function PaymentForm({
 
   useEffect(() => { onConfirmRef.current = onConfirm; }, [onConfirm]);
 
-  // When the system-browser payment tab is closed, check whether the booking is already paid.
+  // Native apps: when the system-browser tab is closed, attempt to confirm the booking.
+  // confirmBooking on the backend is idempotent and will only succeed if payment was paid.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let listener;
@@ -51,6 +52,19 @@ export default function PaymentForm({
     }
     setup();
     return () => { if (listener?.remove) listener.remove(); };
+  }, []);
+
+  // Web: listen for a payment-success message from the wallet-pay tab.
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) return;
+    function onMessage(event) {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === 'wirral-payment-success') {
+        onConfirmRef.current();
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
   }, []);
 
   useEffect(() => {
@@ -185,13 +199,13 @@ export default function PaymentForm({
 
   async function openBrowserPayment() {
     const params = new URLSearchParams();
-    if (outboundJobId && returnJobId) {
-      params.set('outboundJobId', outboundJobId);
-      params.set('returnJobId', returnJobId);
-    } else if (jobId) {
-      params.set('jobId', jobId);
+    if (outboundPendingBookingId && returnPendingBookingId) {
+      params.set('outboundPendingBookingId', outboundPendingBookingId);
+      params.set('returnPendingBookingId', returnPendingBookingId);
+    } else if (pendingBookingId) {
+      params.set('pendingBookingId', pendingBookingId);
     } else {
-      setPayError('Cannot open browser payment: job details are missing.');
+      setPayError('Cannot open browser payment: booking details are missing.');
       return;
     }
     params.set('bookingFee', Number(bookingFee).toFixed(2));
@@ -209,11 +223,11 @@ export default function PaymentForm({
     } catch (e) {
       browserOpenedRef.current = false;
       setBrowserOpen(false);
-      setPayError('Could not open the browser payment page. Please enter your card above.');
+      setPayError('Could not open the browser payment page.');
     }
   }
 
-  const hasJobContext = !!(jobId || (outboundJobId && returnJobId));
+  const hasJobContext = !!(pendingBookingId || (outboundPendingBookingId && returnPendingBookingId));
   const onWalletPayPage = typeof window !== 'undefined' && window.location.pathname === '/wallet-pay';
 
   if (clientSecret !== 'square') {
@@ -238,10 +252,6 @@ export default function PaymentForm({
         </span>
       </p>
 
-      <p style={{ fontSize: '0.75rem', color: '#888', textAlign: 'center' }}>
-        DEBUG: path={typeof window !== 'undefined' ? window.location.pathname : ''} jobId={jobId || '-'} outbound={outboundJobId || '-'} return={returnJobId || '-'}
-      </p>
-
       {!onWalletPayPage && (
         <button
           type="button"
@@ -253,29 +263,30 @@ export default function PaymentForm({
           {browserOpen ? 'Waiting for browser payment…' : 'Pay with Google Pay / Apple Pay / saved card'} <b>›</b>
         </button>
       )}
-      {onWalletPayPage && (
-        <p style={{ fontSize: '0.8rem', color: 'var(--cream-dim)', textAlign: 'center', marginBottom: '1rem' }}>
-          Use your saved card, Google Pay or Apple Pay above.
-        </p>
-      )}
 
       {!SQUARE_APP_ID || !SQUARE_LOCATION_ID ? (
         <p className="error">Payments are not configured. Please contact support.</p>
       ) : (
         <>
-          <div ref={cardContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
-          <div ref={googleContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
-          <div ref={appleContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
-          <div ref={paymentRequestContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
-          <p style={{ color: 'var(--cream-dim)', fontSize: '0.8rem', textAlign: 'center', margin: '0.25rem 0 1rem' }}>
-            Google Pay / Apple Pay buttons only appear when your device/browser supports them and Square has verified this domain.
-          </p>
+          {(onWalletPayPage || !hasJobContext) && (
+            <>
+              <div ref={cardContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
+              <div ref={googleContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
+              <div ref={appleContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
+              <div ref={paymentRequestContainerRef} style={{ minHeight: 44, marginBottom: 12 }} />
+              <p style={{ color: 'var(--cream-dim)', fontSize: '0.8rem', textAlign: 'center', margin: '0.25rem 0 1rem' }}>
+                Google Pay / Apple Pay buttons only appear when your device/browser supports them and Square has verified this domain.
+              </p>
+            </>
+          )}
 
           {(payError || error) && <p className="error">{payError || error}</p>}
 
-          <button className="wj-details-submit" onClick={payWithCard} disabled={!ready || payLoading || loading}>
-            {payLoading || loading ? 'Processing…' : `Pay £${Number(bookingFee).toFixed(2)} booking fee`} <b>›</b>
-          </button>
+          {(onWalletPayPage || !hasJobContext) && (
+            <button className="wj-details-submit" onClick={payWithCard} disabled={!ready || payLoading || loading}>
+              {payLoading || loading ? 'Processing…' : `Pay £${Number(bookingFee).toFixed(2)} booking fee`} <b>›</b>
+            </button>
+          )}
         </>
       )}
     </div>
