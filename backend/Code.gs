@@ -1198,9 +1198,18 @@ function sendPushNotification(fcmToken, title, body, data) {
   if (!accessToken) return false;
   const message = {
     token: fcmToken,
-    notification: { title, body },
+    notification: { title: title || '', body: body || '' },
     data: data || {},
-    android: { priority: 'high', notification: { channel_id: 'job_offers', priority: 'max', default_vibrate_timings: true } }
+    android: {
+      priority: 'high',
+      notification: {
+        channelId: 'job_offers',
+        notificationPriority: 'PRIORITY_MAX',
+        defaultSound: true,
+        defaultVibrateTimings: true,
+        visibility: 'VISIBILITY_PUBLIC'
+      }
+    }
   };
   try {
     const res = UrlFetchApp.fetch('https://fcm.googleapis.com/v1/projects/' + projectId + '/messages:send', {

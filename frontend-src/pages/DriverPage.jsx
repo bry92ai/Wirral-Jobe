@@ -239,6 +239,10 @@ function DriverPageContent() {
       localStorage.setItem('driverId', res.driverId);
       localStorage.setItem('driverName', res.name);
       localStorage.setItem('driverToken', res.token);
+      const fcmToken = localStorage.getItem('fcmToken');
+      if (fcmToken) {
+        api('driver/register-push', { driverToken: res.token, fcmToken }).catch(err => console.error('Driver push register after login failed:', err));
+      }
       setDriverName(res.name);
       setLoggedIn(true);
     } catch (err) { setError(err.message); }

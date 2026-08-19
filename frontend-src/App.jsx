@@ -29,6 +29,7 @@ export default function App() {
       }
     }).catch(err => console.error('Push permission error:', err));
     PushNotifications.addListener('registration', token => {
+      localStorage.setItem('fcmToken', token.value);
       const customerToken = localStorage.getItem(SESSION_KEY);
       const driverToken = localStorage.getItem('driverToken');
       if (customerToken) {
