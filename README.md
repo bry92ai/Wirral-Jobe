@@ -63,3 +63,29 @@ npm run build
 ```
 
 Output goes to `dist/`.
+
+## Build Android test APK
+
+The project is wrapped with Capacitor for Android. Before building, create a `.env` file from `.env.example` and set `VITE_API_URL` to the live Apps Script web app URL.
+
+```bash
+# macOS example
+npm run build
+npm run cap:sync
+npm run cap:open
+```
+
+`cap open` launches Android Studio. From there:
+
+1. Wait for Gradle sync to finish.
+2. Choose **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
+3. The debug APK will be at `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+If you prefer the command line and have Android SDK + a compatible JDK installed:
+
+```bash
+cd android
+./gradlew assembleDebug
+```
+
+Then install `android/app/build/outputs/apk/debug/app-debug.apk` on a test device.

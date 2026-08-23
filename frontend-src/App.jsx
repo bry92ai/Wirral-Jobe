@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Routes, Route, Link, Navigate } from 'react-router-dom';
+import { Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { api } from './lib/api.js';
@@ -21,6 +21,7 @@ function Landing() {
 }
 
 export default function App() {
+  const navigate = useNavigate();
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     PushNotifications.requestPermissions().then(res => {
@@ -48,11 +49,10 @@ export default function App() {
     PushNotifications.addListener('pushNotificationActionPerformed', action => {
       const data = action.notification?.data;
       if (data?.route) {
-        window.location.hash = '';
-        window.location.pathname = data.route;
+        navigate(data.route);
       }
     });
-  }, []);
+  }, [navigate]);
 
   return (
     <div className="app">

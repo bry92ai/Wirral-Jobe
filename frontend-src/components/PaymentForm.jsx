@@ -30,6 +30,7 @@ export default function PaymentForm({
   const paymentRequestContainerRef = useRef(null);
   const onConfirmRef = useRef(onConfirm);
   const browserOpenedRef = useRef(false);
+  const browserListenerReadyRef = useRef(Promise.resolve());
 
   useEffect(() => { onConfirmRef.current = onConfirm; }, [onConfirm]);
 
@@ -38,6 +39,8 @@ export default function PaymentForm({
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let listener;
+    let resolveReady = () => {};
+    browserListenerReadyRef.current = new Promise(resolve => { resolveReady = resolve; });
     async function setup() {
       try {
         listener = await Browser.addListener('browserFinished', () => {
@@ -48,6 +51,8 @@ export default function PaymentForm({
         });
       } catch (e) {
         // Browser plugin not available
+      } finally {
+        resolveReady();
       }
     }
     setup();
@@ -212,12 +217,14 @@ export default function PaymentForm({
     params.set('fare', Number(fare).toFixed(2));
     const url = `${window.location.origin}/wallet-pay?${params.toString()}`;
 
-    browserOpenedRef.current = true;
     setBrowserOpen(true);
     try {
       if (Capacitor.isNativePlatform()) {
+        await browserListenerReadyRef.current;
+        browserOpenedRef.current = true;
         await Browser.open({ url });
       } else {
+        browserOpenedRef.current = true;
         window.open(url, '_blank');
       }
     } catch (e) {

@@ -41,8 +41,12 @@ export function loadGoogleMapsScript(apiKey, timeoutMs = 15000) {
     window.__gmLoadPromiseResolve = onInit;
 
     if (existing) {
-      existing.addEventListener('load', onInit);
-      existing.addEventListener('error', () => finish(new Error('Failed to load Google Maps.')));
+      if (window.google?.maps?.Map) {
+        finish();
+      } else {
+        existing.addEventListener('load', onInit);
+        existing.addEventListener('error', () => finish(new Error('Failed to load Google Maps.')));
+      }
       return;
     }
 

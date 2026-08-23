@@ -4,6 +4,7 @@ import { api, apiGet } from '../lib/api.js';
 import { calculateFare, calculateAirportFare, getTimeOfDay } from '../lib/fare.js';
 import { distanceMiles } from '../lib/geo.js';
 import { loadGoogleMapsScript } from '../lib/maps.js';
+import { Geolocation } from '@capacitor/geolocation';
 import logo from '../assets/logo.jpg';
 
 const Icon = {
@@ -330,12 +331,20 @@ export default function BookingPage() {
   }, [customerToken, navigate]);
 
   useEffect(() => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setPickupFromLatLng(pos.coords.latitude, pos.coords.longitude),
-      () => { if (!pickup.lat) setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng); },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-    );
+    async function getPickupLocation() {
+      try {
+        const permission = await Geolocation.requestPermissions();
+        if (permission.location !== 'granted' && permission.coarseLocation !== 'granted') {
+          if (!pickup.lat) setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
+          return;
+        }
+        const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
+        setPickupFromLatLng(pos.coords.latitude, pos.coords.longitude);
+      } catch (err) {
+        if (!pickup.lat) setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
+      }
+    }
+    getPickupLocation();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1045,7 +1054,7 @@ export default function BookingPage() {
             </p>
             {result && !isFuture && (
               <button
-                onClick={() => window.location.href = `/track/${result.trackingToken}`}
+                onClick={() => navigate(`/track/${result.trackingToken}`)}
                 className="btn btn-primary"
                 style={{ marginBottom: '1rem' }}
               >
