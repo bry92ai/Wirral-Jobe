@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">WirralJobe</string>
+    <string name="title_activity_main">WirralJobe</string>
+    <string name="package_name">com.wirraljobe.app</string>
+    <string name="custom_url_scheme">com.wirraljobe.app</string>
+</resources>

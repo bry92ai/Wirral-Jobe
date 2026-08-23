@@ -8,4 +8,3 @@ service-account.json
 *.sqlite3
 .netlify/
 .clasp.json
-/android

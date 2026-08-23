@@ -4,7 +4,7 @@ import { api, apiGet } from '../lib/api.js';
 import { FLIGHTPATH_ZONES, findZone, getZoneName } from '../lib/zones.js';
 import { distanceMiles } from '../lib/geo.js';
 import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg, coinIcon } from '../lib/leaflet.js';
-import { startDriverService, stopDriverService } from '../lib/driverService.js';
+import { startDriverService, updateDriverService, stopDriverService } from '../lib/driverService.js';
 import { Geolocation } from '@capacitor/geolocation';
 import logo from '../assets/logo.jpg';
 
@@ -141,10 +141,15 @@ function DriverPageContent() {
     if (!storedId || !storedToken) return;
     async function restore() {
       try {
-        await apiGet('/driver/me', { 'x-driver-id': storedId, 'x-driver-token': storedToken });
+        const data = await apiGet('/driver/me', { 'x-driver-id': storedId, 'x-driver-token': storedToken });
         setDriverId(storedId);
         setDriverName(localStorage.getItem('driverName') || '');
         setLoggedIn(true);
+        startDriverService({
+          driverId: storedId,
+          driverToken: localStorage.getItem('driverToken') || '',
+          status: data?.status || 'AVAILABLE'
+        });
       } catch {
         localStorage.removeItem('driverId');
         localStorage.removeItem('driverName');
@@ -180,6 +185,16 @@ function DriverPageContent() {
       waitingSeconds: Number(activeJob.meterWaitingSeconds) || 0
     };
   }, [activeJob, now]);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    const status = activeJob?.status || profile?.status || 'AVAILABLE';
+    updateDriverService({
+      status,
+      jobId: activeJob?.jobId || '',
+      fare: activeJob?.meterFare || activeJob?.fare || 0
+    });
+  }, [activeJob, profile, loggedIn]);
 
   const driverZone = (d) => {
     if (d?.zone) return d.zone;
@@ -245,12 +260,18 @@ function DriverPageContent() {
       }
       setDriverName(res.name);
       setLoggedIn(true);
+      startDriverService({
+        driverId: res.driverId,
+        driverToken: res.token,
+        status: res.status || 'AVAILABLE'
+      });
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   }
 
   async function logout() {
     try { await api('driver/logout', {}, driverAuth()); } catch (err) { console.error(err); }
+    stopDriverService();
     localStorage.removeItem('driverId');
     localStorage.removeItem('driverName');
     localStorage.removeItem('driverToken');
@@ -267,10 +288,13 @@ function DriverPageContent() {
     setError('');
     try {
       await api('driver/availability', { status }, driverAuth());
-      if (status === 'AVAILABLE') {
-        startDriverService();
-      } else {
-        stopDriverService();
+      if (status === 'AVAILABLE' || status === 'BREAK') {
+        const token = localStorage.getItem('driverToken') || '';
+        if (status === 'AVAILABLE') {
+          startDriverService({ driverId, driverToken: token, status });
+        } else {
+          stopDriverService();
+        }
       }
       await loadProfile();
     } catch (err) {
@@ -429,7 +453,11 @@ function DriverPageContent() {
 
   async function setStatus(jobId, status) {
     setLoading(true);
-    try { await api(`driver/jobs/${jobId}/status`, { status }, driverAuth()); await loadJobs(); await loadProfile(); }
+    try {
+      await api(`driver/jobs/${jobId}/status`, { status }, driverAuth());
+      await loadJobs(); await loadProfile();
+      updateDriverService({ status, jobId, fare: activeJob?.fare || 0 });
+    }
     catch (err) { setError(err.message); }
     finally { setLoading(false); }
   }
