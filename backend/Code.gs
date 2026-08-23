@@ -1209,7 +1209,8 @@ function sendPushNotification(fcmToken, title, body, data) {
   if (isOffer && data.acceptToken && data.declineToken) {
     notification.actions = [
       { title: 'Accept', action: 'com.wirraljobe.app.action.ACCEPT_OFFER' },
-      { title: 'Decline', action: 'com.wirraljobe.app.action.DECLINE_OFFER' }
+      { title: 'Decline', action: 'com.wirraljobe.app.action.DECLINE_OFFER' },
+      { title: 'Show', action: 'com.wirraljobe.app.action.SHOW_OFFER' }
     ];
   }
   const message = {
@@ -2036,7 +2037,7 @@ function startOfferToDriver(jobId, pickupLat, pickupLng, driverId) {
   if (job) {
     const acceptToken = secureActionToken(jobId, driverId, 'accept');
     const declineToken = secureActionToken(jobId, driverId, 'decline');
-    sendPushToDriver(driverId, 'New Job Offer!', job.pickup_address + ' → ' + job.dropoff_address + ' £' + Number(job.fare).toFixed(2), { route: '/driver', type: 'job_offer', jobId, driverId, acceptToken, declineToken });
+    sendPushToDriver(driverId, 'New Job Offer!', job.pickup_address + ' → ' + job.dropoff_address + ' £' + Number(job.fare).toFixed(2), { route: '/driver', type: 'job_offer', jobId, driverId, acceptToken, declineToken, pickup: job.pickup_address || '', dropoff: job.dropoff_address || '', fare: '£' + Number(job.fare).toFixed(2) });
   }
 }
 
@@ -2096,7 +2097,7 @@ function advanceOffers() {
         if (job) {
           const acceptToken = secureActionToken(offer.jobId, next.id, 'accept');
           const declineToken = secureActionToken(offer.jobId, next.id, 'decline');
-          sendPushToDriver(next.id, 'New Job Offer!', job.pickup_address + ' → ' + job.dropoff_address + ' £' + Number(job.fare).toFixed(2), { route: '/driver', type: 'job_offer', jobId: offer.jobId, driverId: next.id, acceptToken, declineToken });
+          sendPushToDriver(next.id, 'New Job Offer!', job.pickup_address + ' → ' + job.dropoff_address + ' £' + Number(job.fare).toFixed(2), { route: '/driver', type: 'job_offer', jobId: offer.jobId, driverId: next.id, acceptToken, declineToken, pickup: job.pickup_address || '', dropoff: job.dropoff_address || '', fare: '£' + Number(job.fare).toFixed(2) });
         }
       }
     } catch (e) {

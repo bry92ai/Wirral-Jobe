@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/floating_offer_root"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/floating_offer_background"
+    android:padding="16dp"
+    android:elevation="8dp">
+
+    <TextView
+        android:id="@+id/offer_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="New Job Offer"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/offer_pickup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Pickup"
+        android:textColor="#E0E0E0"
+        android:textSize="13sp"
+        android:maxWidth="260dp"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/offer_dropoff"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Drop-off"
+        android:textColor="#E0E0E0"
+        android:textSize="13sp"
+        android:maxWidth="260dp"
+        android:layout_marginTop="2dp" />
+
+    <TextView
+        android:id="@+id/offer_fare"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="£0.00"
+        android:textColor="#FFD700"
+        android:textStyle="bold"
+        android:textSize="20sp"
+        android:layout_marginTop="8dp" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="12dp">
+
+        <Button
+            android:id="@+id/btn_decline"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Decline"
+            android:backgroundTint="#333333"
+            android:textColor="#FFFFFF" />
+
+        <Button
+            android:id="@+id/btn_accept"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Accept"
+            android:layout_marginStart="8dp"
+            android:backgroundTint="#4CAF50"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/btn_close"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Close"
+        android:layout_marginTop="8dp"
+        android:backgroundTint="#555555"
+        android:textColor="#FFFFFF"
+        android:layout_gravity="end" />
+</LinearLayout>

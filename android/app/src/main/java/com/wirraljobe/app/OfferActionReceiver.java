@@ -46,6 +46,17 @@ public class OfferActionReceiver extends BroadcastReceiver {
             secureAction = "decline";
             token = declineToken;
             toastMessage = "Declining offer…";
+        } else if ("com.wirraljobe.app.action.SHOW_OFFER".equals(action)) {
+            Intent showIntent = new Intent(context, FloatingOfferService.class);
+            showIntent.putExtra("jobId", jobId);
+            showIntent.putExtra("driverId", driverId);
+            showIntent.putExtra("acceptToken", acceptToken);
+            showIntent.putExtra("declineToken", declineToken);
+            showIntent.putExtra("pickup", intent.getStringExtra("pickup"));
+            showIntent.putExtra("dropoff", intent.getStringExtra("dropoff"));
+            showIntent.putExtra("fare", intent.getStringExtra("fare"));
+            context.startService(showIntent);
+            return;
         } else {
             return;
         }
