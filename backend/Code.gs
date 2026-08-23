@@ -1198,19 +1198,27 @@ function sendPushNotification(fcmToken, title, body, data) {
   if (!projectId) return false;
   const accessToken = getFcmAccessToken();
   if (!accessToken) return false;
+  const isOffer = data && data.type === 'job_offer';
+  const notification = {
+    channelId: 'job_offers',
+    notificationPriority: 'PRIORITY_MAX',
+    defaultSound: true,
+    defaultVibrateTimings: true,
+    visibility: 'VISIBILITY_PUBLIC'
+  };
+  if (isOffer && data.acceptToken && data.declineToken) {
+    notification.actions = [
+      { title: 'Accept', action: 'com.wirraljobe.app.action.ACCEPT_OFFER' },
+      { title: 'Decline', action: 'com.wirraljobe.app.action.DECLINE_OFFER' }
+    ];
+  }
   const message = {
     token: fcmToken,
     notification: { title: title || '', body: body || '' },
     data: data || {},
     android: {
       priority: 'high',
-      notification: {
-        channelId: 'job_offers',
-        notificationPriority: 'PRIORITY_MAX',
-        defaultSound: true,
-        defaultVibrateTimings: true,
-        visibility: 'VISIBILITY_PUBLIC'
-      }
+      notification: notification
     }
   };
   try {
@@ -2026,7 +2034,9 @@ function startOfferToDriver(jobId, pickupLat, pickupLng, driverId) {
   Logger.log('startOfferToDriver: offering job %s to driver %s', jobId, driverId);
   const job = findJobById(jobId);
   if (job) {
-    sendPushToDriver(driverId, 'New Job Offer!', job.pickup_address + ' → ' + job.dropoff_address + ' £' + Number(job.fare).toFixed(2), { route: '/driver', type: 'job_offer', jobId });
+    const acceptToken = secureActionToken(jobId, driverId, 'accept');
+    const declineToken = secureActionToken(jobId, driverId, 'decline');
+    sendPushToDriver(driverId, 'New Job Offer!', job.pickup_address + ' → ' + job.dropoff_address + ' £' + Number(job.fare).toFixed(2), { route: '/driver', type: 'job_offer', jobId, driverId, acceptToken, declineToken });
   }
 }
 
@@ -2084,7 +2094,9 @@ function advanceOffers() {
         sheet.getRange(idx, 2, 1, 4).setValues([[next.id, JSON.stringify(offered), Date.now() + 60000, offer.pickupLat]]);
         const job = findJobById(offer.jobId);
         if (job) {
-          sendPushToDriver(next.id, 'New Job Offer!', job.pickup_address + ' → ' + job.dropoff_address + ' £' + Number(job.fare).toFixed(2), { route: '/driver', type: 'job_offer', jobId: offer.jobId });
+          const acceptToken = secureActionToken(offer.jobId, next.id, 'accept');
+          const declineToken = secureActionToken(offer.jobId, next.id, 'decline');
+          sendPushToDriver(next.id, 'New Job Offer!', job.pickup_address + ' → ' + job.dropoff_address + ' £' + Number(job.fare).toFixed(2), { route: '/driver', type: 'job_offer', jobId: offer.jobId, driverId: next.id, acceptToken, declineToken });
         }
       }
     } catch (e) {

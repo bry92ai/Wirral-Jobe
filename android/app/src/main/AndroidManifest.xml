@@ -38,6 +38,15 @@
             android:name=".DriverForegroundService"
             android:exported="false"
             android:foregroundServiceType="location" />
+
+        <receiver
+            android:name=".OfferActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.wirraljobe.app.action.ACCEPT_OFFER" />
+                <action android:name="com.wirraljobe.app.action.DECLINE_OFFER" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->
