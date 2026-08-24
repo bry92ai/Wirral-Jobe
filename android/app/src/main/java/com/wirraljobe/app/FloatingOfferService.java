@@ -30,7 +30,8 @@ import java.util.concurrent.Executors;
 public class FloatingOfferService extends Service {
 
     private static final String TAG = "FloatingOfferService";
-    private static final String API_URL = "https://wirraljobe.com/api/driver/secure-action";
+
+    private String apiUrl = "https://wirraljobe.com/";
 
     private WindowManager windowManager;
     private View floatingView;
@@ -61,6 +62,7 @@ public class FloatingOfferService extends Service {
         String pickup = intent.getStringExtra("pickup");
         String dropoff = intent.getStringExtra("dropoff");
         String fare = intent.getStringExtra("fare");
+        if (intent.hasExtra("apiUrl")) apiUrl = intent.getStringExtra("apiUrl");
 
         if (jobId == null || driverId == null || acceptToken == null || declineToken == null) {
             stopSelf();
@@ -173,7 +175,7 @@ public class FloatingOfferService extends Service {
     private void sendSecureAction(String jobId, String driverId, String action, String token) {
         executor.execute(() -> {
             try {
-                URL url = new URL(API_URL);
+                URL url = new URL(apiUrl.replaceAll("/+$", "") + "/api/driver/secure-action");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");

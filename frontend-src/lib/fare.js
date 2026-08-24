@@ -18,13 +18,12 @@ const AIRPORTS = [
 
 export function calculateAirportFare({ pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType = 'car' }) {
   if (pickupLat == null || pickupLng == null || dropoffLat == null || dropoffLng == null) return null;
-  for (const airport of AIRPORTS) {
-    const nearPickup = distanceMiles(pickupLat, pickupLng, airport.lat, airport.lng) <= 2;
-    const nearDropoff = distanceMiles(dropoffLat, dropoffLng, airport.lat, airport.lng) <= 2;
-    if (nearPickup || nearDropoff) {
-      return vehicleType === 'mpv' ? airport.mpvFare : airport.carFare;
-    }
-  }
+  const pickupAirports = AIRPORTS.filter(a => distanceMiles(pickupLat, pickupLng, a.lat, a.lng) <= 2);
+  const dropoffAirports = AIRPORTS.filter(a => distanceMiles(dropoffLat, dropoffLng, a.lat, a.lng) <= 2);
+  // Only treat as an airport transfer if exactly one end is near an airport.
+  if (pickupAirports.length > 0 && dropoffAirports.length > 0) return null;
+  const airport = pickupAirports[0] || dropoffAirports[0];
+  if (airport) return vehicleType === 'mpv' ? airport.mpvFare : airport.carFare;
   return null;
 }
 

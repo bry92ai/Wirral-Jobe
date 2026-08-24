@@ -14,7 +14,10 @@ public class DriverServicePlugin extends Plugin {
     public void start(PluginCall call) {
         Intent intent = new Intent(getContext(), DriverForegroundService.class);
         intent.setAction("START");
-        intent.putExtra("apiUrl", call.getString("apiUrl", "https://wirraljobe.com/"));
+        String apiUrl = call.getString("apiUrl", "https://wirraljobe.com/");
+        getContext().getSharedPreferences("wirraljobe", android.content.Context.MODE_PRIVATE)
+            .edit().putString("apiUrl", apiUrl).apply();
+        intent.putExtra("apiUrl", apiUrl);
         intent.putExtra("driverId", call.getString("driverId", ""));
         intent.putExtra("driverToken", call.getString("driverToken", ""));
         intent.putExtra("status", call.getString("status", "AVAILABLE"));

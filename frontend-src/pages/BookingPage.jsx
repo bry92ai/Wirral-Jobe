@@ -4,6 +4,7 @@ import { api, apiGet } from '../lib/api.js';
 import { calculateFare, calculateAirportFare, getTimeOfDay } from '../lib/fare.js';
 import { distanceMiles } from '../lib/geo.js';
 import { loadGoogleMapsScript } from '../lib/maps.js';
+import { loadSquarePayments } from '../lib/squarePayments.js';
 import { Geolocation } from '@capacitor/geolocation';
 import logo from '../assets/logo.jpg';
 
@@ -29,24 +30,6 @@ const AIRPORTS = [
 ];
 
 function formatCurrency(n) { return `£${Number(n).toFixed(2)}`; }
-function loadSquareScript() {
-  if (window.Square) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-square-sdk]');
-    if (existing) {
-      existing.addEventListener('load', resolve, { once: true });
-      existing.addEventListener('error', () => reject(new Error('Square payment form failed to load.')), { once: true });
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://web.squarecdn.com/v1/square.js';
-    script.async = true;
-    script.dataset.squareSdk = 'true';
-    script.onload = resolve;
-    script.onerror = () => reject(new Error('Square payment form failed to load.'));
-    document.head.appendChild(script);
-  });
-}
 function PaymentForm({ fare, bookingFee, clientSecret, onConfirm, loading, error }) {
   const containerRef = useRef(null);
   const cardRef = useRef(null);
@@ -55,10 +38,12 @@ function PaymentForm({ fare, bookingFee, clientSecret, onConfirm, loading, error
 
   useEffect(() => {
     if (!clientSecret) return;
+    if (!SQUARE_APPLICATION_ID || !SQUARE_LOCATION_ID) {
+      setPaymentError('Square payment settings are missing.');
+      return;
+    }
     let active = true;
-    loadSquareScript().then(async () => {
-      if (!SQUARE_APPLICATION_ID || !SQUARE_LOCATION_ID) throw new Error('Square payment settings are missing.');
-      const payments = window.Square.payments(SQUARE_APPLICATION_ID, SQUARE_LOCATION_ID);
+    loadSquarePayments(SQUARE_APPLICATION_ID, SQUARE_LOCATION_ID).then(async (payments) => {
       const card = await payments.card();
       await card.attach(containerRef.current);
       if (active) { cardRef.current = card; setReady(true); }

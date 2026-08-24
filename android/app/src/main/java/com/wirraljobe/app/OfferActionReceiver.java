@@ -18,7 +18,6 @@ import java.nio.charset.StandardCharsets;
 public class OfferActionReceiver extends BroadcastReceiver {
 
     private static final String TAG = "OfferActionReceiver";
-    private static final String API_URL = "https://wirraljobe.com/api/driver/secure-action";
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -29,13 +28,20 @@ public class OfferActionReceiver extends BroadcastReceiver {
         String acceptToken = intent.getStringExtra("acceptToken");
         String declineToken = intent.getStringExtra("declineToken");
 
+        String baseUrl = intent.getStringExtra("apiUrl");
+        if (baseUrl == null || baseUrl.isEmpty()) {
+            baseUrl = context.getSharedPreferences("wirraljobe", Context.MODE_PRIVATE)
+                .getString("apiUrl", "https://wirraljobe.com/");
+        }
+        final String apiUrl = baseUrl;
+
         if (jobId == null || driverId == null || acceptToken == null || declineToken == null) {
             Log.w(TAG, "Missing offer extras; action=" + action);
             return;
         }
 
         if ("com.wirraljobe.app.action.SHOW_OFFER".equals(action)) {
-            startFloatingService(context, intent);
+            startFloatingService(context, intent, apiUrl);
             return;
         }
 
@@ -60,15 +66,16 @@ public class OfferActionReceiver extends BroadcastReceiver {
         final PendingResult pendingResult = goAsync();
         new Thread(() -> {
             try {
-                sendSecureAction(context, jobId, driverId, secureAction, token);
+                sendSecureAction(context, apiUrl, jobId, driverId, secureAction, token);
             } finally {
                 pendingResult.finish();
             }
         }).start();
     }
 
-    private void startFloatingService(Context context, Intent intent) {
+    private void startFloatingService(Context context, Intent intent, String apiUrl) {
         Intent showIntent = new Intent(context, FloatingOfferService.class);
+        showIntent.putExtra("apiUrl", apiUrl);
         showIntent.putExtra("jobId", intent.getStringExtra("jobId"));
         showIntent.putExtra("driverId", intent.getStringExtra("driverId"));
         showIntent.putExtra("acceptToken", intent.getStringExtra("acceptToken"));
@@ -79,9 +86,9 @@ public class OfferActionReceiver extends BroadcastReceiver {
         context.startService(showIntent);
     }
 
-    private void sendSecureAction(Context context, String jobId, String driverId, String secureAction, String token) {
+    private void sendSecureAction(Context context, String apiUrl, String jobId, String driverId, String secureAction, String token) {
         try {
-            URL url = new URL(API_URL);
+            URL url = new URL(apiUrl.replaceAll("/+$", "") + "/api/driver/secure-action");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
