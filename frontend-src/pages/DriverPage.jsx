@@ -5,6 +5,7 @@ import { FLIGHTPATH_ZONES, findZone, getZoneName } from '../lib/zones.js';
 import { distanceMiles } from '../lib/geo.js';
 import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg, coinIcon, maneuverIconSvg } from '../lib/leaflet.js';
 import { startDriverService, updateDriverService, stopDriverService } from '../lib/driverService.js';
+import { requestBackgroundLocationPermission, openAppSettings } from '../lib/locationPermission.js';
 import { Geolocation } from '@capacitor/geolocation';
 import { Capacitor } from '@capacitor/core';
 import DriverRouteLayer from '../components/DriverRouteLayer.jsx';
@@ -117,6 +118,7 @@ function DriverPageContent() {
   const [appError, setAppError] = useState('');
   const [mapMode, setMapMode] = useState('zone');
   const [routeInfo, setRouteInfo] = useState(null);
+  const [bgLocationStatus, setBgLocationStatus] = useState('unknown');
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -149,6 +151,7 @@ function DriverPageContent() {
         setDriverId(storedId);
         setDriverName(localStorage.getItem('driverName') || '');
         setLoggedIn(true);
+        requestBackgroundLocationPermission().then(({ backgroundLocation }) => setBgLocationStatus(backgroundLocation));
         startDriverService({
           driverId: storedId,
           driverToken: localStorage.getItem('driverToken') || '',
@@ -274,6 +277,7 @@ function DriverPageContent() {
       }
       setDriverName(res.name);
       setLoggedIn(true);
+      requestBackgroundLocationPermission().then(({ backgroundLocation }) => setBgLocationStatus(backgroundLocation));
       startDriverService({
         driverId: res.driverId,
         driverToken: res.token,
@@ -939,14 +943,23 @@ function DriverPageContent() {
         </div>
       </div>
 
+      {Capacitor.isNativePlatform() && bgLocationStatus === 'denied' && (
+        <div style={{ position: 'absolute', top: 76, left: 12, right: 12, zIndex: 1001 }}>
+          <div className="card" style={{ padding: '0.65rem 0.9rem', borderRadius: 12, border: '1.5px solid var(--gold)', background: 'rgba(10,10,10,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--cream)' }}>Enable "Allow all the time" location so we can track jobs in the background.</span>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => openAppSettings()}>Open settings</button>
+          </div>
+        </div>
+      )}
+
       {locationError && (
-        <div style={{ position: 'absolute', top: 76, left: 12, right: 12, zIndex: 1000 }}>
+        <div style={{ position: 'absolute', top: Capacitor.isNativePlatform() && bgLocationStatus === 'denied' ? 140 : 76, left: 12, right: 12, zIndex: 1000 }}>
           <p className="error" style={{ margin: 0, padding: '0.6rem 0.9rem', borderRadius: 10, background: 'var(--surface)', border: '1.5px solid rgba(239,68,68,0.4)' }}>{locationError}</p>
         </div>
       )}
 
       {appError && (
-        <div style={{ position: 'absolute', top: locationError ? 140 : 76, left: 12, right: 12, zIndex: 1000 }}>
+        <div style={{ position: 'absolute', top: ((Capacitor.isNativePlatform() && bgLocationStatus === 'denied' ? 64 : 0) + (locationError ? 64 : 0) + 76), left: 12, right: 12, zIndex: 1000 }}>
           <pre style={{ margin: 0, padding: '0.6rem 0.9rem', borderRadius: 10, background: 'var(--surface)', border: '1.5px solid rgba(239,68,68,0.4)', color: '#ff9d9d', fontSize: '0.75rem', whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto' }}>{appError}</pre>
         </div>
       )}
