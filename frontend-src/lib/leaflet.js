@@ -58,6 +58,12 @@ export function headingIcon(L, color, heading, size = 36, className = '') {
 export const pickupIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 24"><path fill="#22c55e" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
 export const dropoffIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 24 24"><path fill="#ef4444" d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7z"/><circle cx="12" cy="9" r="3" fill="white"/></svg>`;
 
+export const speedCameraIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><rect x="2" y="7" width="13" height="9" rx="2" fill="#ef4444" stroke="white" stroke-width="1.5"/><circle cx="8.5" cy="11.5" r="2.5" fill="#111"/><circle cx="8.5" cy="11.5" r="1.2" fill="#ef4444"/><path d="M15 9l6-2.5v9L15 13z" fill="#374151"/></svg>`;
+
+export const policeIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><path d="M12 2L2 7v10l10 5 10-5V7L12 2z" fill="#3b82f6" stroke="white" stroke-width="1.5"/><path d="M12 7v8M8 11l4-4 4 4" stroke="white" stroke-width="2" fill="none"/></svg>`;
+
+export const hazardIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><path d="M12 2L1 22h22L12 2z" fill="#f59e0b" stroke="white" stroke-width="1.5"/><path d="M12 8v7M12 17h.01" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg>`;
+
 export function coinIconHtml(size = 32) {
   return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:linear-gradient(135deg,#ffd700,#d4af37);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;color:#3a2e08;font-weight:900;font-size:${Math.round(size * 0.55)}px;line-height:1">£</div>`;
 }

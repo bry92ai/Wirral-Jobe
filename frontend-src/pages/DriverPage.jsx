@@ -6,6 +6,7 @@ import { distanceMiles } from '../lib/geo.js';
 import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg, coinIcon } from '../lib/leaflet.js';
 import { startDriverService, updateDriverService, stopDriverService } from '../lib/driverService.js';
 import { Geolocation } from '@capacitor/geolocation';
+import DriverRouteLayer from '../components/DriverRouteLayer.jsx';
 import logo from '../assets/logo.jpg';
 
 function playOfferSound() {
@@ -113,6 +114,8 @@ function DriverPageContent() {
   const [followMe, setFollowMe] = useState(true);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
   const [appError, setAppError] = useState('');
+  const [mapMode, setMapMode] = useState('zone');
+  const [routeInfo, setRouteInfo] = useState(null);
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -195,6 +198,15 @@ function DriverPageContent() {
       fare: activeJob?.meterFare || activeJob?.fare || 0
     });
   }, [activeJob, profile, loggedIn]);
+
+  useEffect(() => {
+    if (activeJob) {
+      setMapMode('route');
+    } else {
+      setMapMode('zone');
+      setRouteInfo(null);
+    }
+  }, [activeJob]);
 
   const driverZone = (d) => {
     if (d?.zone) return d.zone;
@@ -536,6 +548,38 @@ function DriverPageContent() {
   }, [loggedIn]);
 
   useEffect(() => {
+    if (!mapReady) return;
+    const map = mapObjRef.current;
+    const inRouteMode = mapMode === 'route';
+    if (geoJsonLayerRef.current) {
+      geoJsonLayerRef.current.setStyle(feature => inRouteMode
+        ? { opacity: 0, fillOpacity: 0 }
+        : getZoneStyle(feature, currentZoneId, selectedZoneId)
+      );
+    }
+    zoneLabelsRef.current.forEach(({ marker }) => {
+      if (marker && marker.setOpacity) marker.setOpacity(inRouteMode ? 0 : 1);
+    });
+    [offerMarkersRef, bidMarkersRef, otherDriverMarkersRef, jobMarkersRef].forEach(ref => {
+      (ref.current || []).forEach(m => { if (m && m.setOpacity) m.setOpacity(inRouteMode ? 0 : 1); });
+    });
+    if (!inRouteMode) {
+      recenterMap();
+    }
+  }, [mapReady, mapMode, currentZoneId, selectedZoneId]);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    const inRouteMode = mapMode === 'route';
+    zoneLabelsRef.current.forEach(({ marker }) => {
+      if (marker && marker.setOpacity) marker.setOpacity(inRouteMode ? 0 : 1);
+    });
+    [offerMarkersRef, bidMarkersRef, otherDriverMarkersRef, jobMarkersRef].forEach(ref => {
+      (ref.current || []).forEach(m => { if (m && m.setOpacity) m.setOpacity(inRouteMode ? 0 : 1); });
+    });
+  }, [mapReady, mapMode, offers, bidBoard, otherDrivers, jobs]);
+
+  useEffect(() => {
     if (!mapReady || !geoJsonLayerRef.current) return;
     geoJsonLayerRef.current.setStyle(feature => getZoneStyle(feature, currentZoneId, selectedZoneId));
   }, [mapReady, currentZoneId, selectedZoneId]);
@@ -553,8 +597,8 @@ function DriverPageContent() {
       selfMarkerRef.current.setLatLng([myLocation.lat, myLocation.lng]);
       selfMarkerRef.current.setIcon(headingIcon(L, '#f4bf1b', heading, 36, 'self-marker'));
     }
-    if (followMe) map.panTo([myLocation.lat, myLocation.lng]);
-  }, [mapReady, myLocation, heading, followMe]);
+    if (followMe && mapMode === 'zone') map.panTo([myLocation.lat, myLocation.lng]);
+  }, [mapReady, myLocation, heading, followMe, mapMode]);
 
   useEffect(() => {
     if (!mapReady || !LRef.current) return;
@@ -833,6 +877,57 @@ function DriverPageContent() {
       )}
 
       <div ref={mapRef} style={{ flex: 1, minHeight: 0 }} />
+      {mapReady && (
+        <DriverRouteLayer
+          map={mapObjRef.current}
+          L={LRef.current}
+          myLocation={myLocation}
+          activeJob={activeJob}
+          visible={mapMode === 'route'}
+          onRouteInfo={setRouteInfo}
+        />
+      )}
+
+      {loggedIn && (
+        <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 1100 }}>
+          <button
+            type="button"
+            onClick={() => setMapMode(m => m === 'route' ? 'zone' : 'route')}
+            className="btn btn-outline btn-sm"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(10,10,10,0.85)' }}
+          >
+            {mapMode === 'route' ? (
+              <>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+                Zonal view
+              </>
+            ) : (
+              <>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
+                Route view
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {mapMode === 'route' && routeInfo && (
+        <div style={{ position: 'absolute', top: 12, left: 12, right: 90, zIndex: 1000 }}>
+          <div className="card" style={{ padding: '0.75rem 1rem', borderRadius: 14, border: '1.5px solid var(--gold)', background: 'rgba(10,10,10,0.92)' }}>
+            <div style={{ fontSize: '0.65rem', color: 'var(--gold)', fontWeight: 800, textTransform: 'uppercase' }}>{routeInfo.targetLabel}</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--cream)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{routeInfo.targetAddress}</div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: '0.75rem', color: 'var(--cream-dim)' }}>
+              <span>{routeInfo.distanceText}</span>
+              <span>{routeInfo.durationText}</span>
+            </div>
+            {routeInfo.steps && routeInfo.steps[0] && (
+              <div style={{ marginTop: 4, fontSize: '0.75rem', color: 'var(--cream)' }}>
+                Next: {routeInfo.steps[0].instruction}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={{
         position: 'absolute', bottom: 74, left: 12, zIndex: 1000,
