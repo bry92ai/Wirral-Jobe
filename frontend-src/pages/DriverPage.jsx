@@ -123,6 +123,7 @@ function DriverPageContent() {
   const mapRef = useRef(null);
   const LRef = useRef(null);
   const mapObjRef = useRef(null);
+  const tileLayerRef = useRef(null);
   const selfMarkerRef = useRef(null);
   const offerMarkersRef = useRef([]);
   const otherDriverMarkersRef = useRef([]);
@@ -497,7 +498,7 @@ function DriverPageContent() {
       LRef.current = L;
       const start = myLocation || MAP_CENTER_DEFAULT;
       const map = L.map(mapRef.current, { zoomControl: false }).setView([start.lat, start.lng], 14);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      tileLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
         maxZoom: 19
       }).addTo(map);
@@ -606,6 +607,13 @@ function DriverPageContent() {
         if (map.keyboard) map.keyboard.enable();
       }
     } catch (e) { console.warn(e); }
+    if (tileLayerRef.current) {
+      // Use a light, label-rich basemap in route mode so road names are easy to read.
+      tileLayerRef.current.setUrl(inRouteMode
+        ? 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
+        : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      );
+    }
   }, [mapReady, mapMode]);
 
   useEffect(() => {
