@@ -38,8 +38,10 @@ public class DriverForegroundService extends Service {
     private static final String CHANNEL_ID = "driver_active";
     private static final int NOTIFICATION_ID = 1001;
     private static final String TAG = "DriverForegroundService";
-    private static final long LOCATION_INTERVAL_MS = 10000;
-    private static final long FASTEST_LOCATION_INTERVAL_MS = 5000;
+    private static final long ACTIVE_INTERVAL_MS = 5000;
+    private static final long ACTIVE_FASTEST_INTERVAL_MS = 2500;
+    private static final long IDLE_INTERVAL_MS = 30000;
+    private static final long IDLE_FASTEST_INTERVAL_MS = 10000;
     private static final long MIN_DISTANCE_METERS = 20;
 
     private FusedLocationProviderClient fusedLocationClient;
@@ -83,6 +85,7 @@ public class DriverForegroundService extends Service {
 
         startForeground(NOTIFICATION_ID, buildNotification());
         startLocationUpdates();
+        restartLocationUpdatesIfRunning();
         return START_STICKY;
     }
 
@@ -151,16 +154,12 @@ public class DriverForegroundService extends Service {
         }
     }
 
+    private boolean isActiveJob() {
+        return "ON_WAY".equals(status) || "ARRIVED".equals(status) || "POB".equals(status);
+    }
+
     private void startLocationUpdates() {
         if (locationCallback != null) return;
-
-        LocationRequest locationRequest = new LocationRequest.Builder(
-            Priority.PRIORITY_BALANCED_POWER_ACCURACY,
-            LOCATION_INTERVAL_MS
-        )
-            .setMinUpdateDistanceMeters(MIN_DISTANCE_METERS)
-            .setMinUpdateIntervalMillis(FASTEST_LOCATION_INTERVAL_MS)
-            .build();
 
         locationCallback = new LocationCallback() {
             @Override
@@ -174,10 +173,34 @@ public class DriverForegroundService extends Service {
             }
         };
 
+        requestLocationUpdates();
+    }
+
+    private void requestLocationUpdates() {
+        if (locationCallback == null || fusedLocationClient == null) return;
+
+        boolean active = isActiveJob();
+        long interval = active ? ACTIVE_INTERVAL_MS : IDLE_INTERVAL_MS;
+        long fastest = active ? ACTIVE_FASTEST_INTERVAL_MS : IDLE_FASTEST_INTERVAL_MS;
+        int priority = active ? Priority.PRIORITY_HIGH_ACCURACY : Priority.PRIORITY_BALANCED_POWER_ACCURACY;
+
+        LocationRequest locationRequest = new LocationRequest.Builder(priority, interval)
+            .setMinUpdateDistanceMeters(MIN_DISTANCE_METERS)
+            .setMinUpdateIntervalMillis(fastest)
+            .build();
+
         try {
+            fusedLocationClient.removeLocationUpdates(locationCallback);
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper());
+            Log.d(TAG, "Location updates restarted: interval=" + interval + "ms active=" + active);
         } catch (SecurityException e) {
             Log.e(TAG, "Location permission not granted", e);
+        }
+    }
+
+    private void restartLocationUpdatesIfRunning() {
+        if (locationCallback != null) {
+            requestLocationUpdates();
         }
     }
 

@@ -313,6 +313,7 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'driver/login') return driverLogin(body);
   if (r === 'driver/logout') return driverLogout(body, driverId, driverToken);
   if (r === 'driver/me') return getDriverMe(requireDriver(driverId, driverToken).id);
+  if (r === 'driver/dashboard') return getDriverDashboard(requireDriver(driverId, driverToken).id);
   if (r === 'driver/jobs') return getDriverJobs(requireDriver(driverId, driverToken).id);
   if (r === 'driver/availability') return setDriverAvailability(body, requireDriver(driverId, driverToken).id);
   if (r === 'driver/offers') return getDriverOffers(requireDriver(driverId, driverToken).id);
@@ -1494,6 +1495,32 @@ function getDriverMe(driverId) {
   };
 }
 
+function getDriverDashboard(driverId) {
+  if (!driverId) throw new Error('No driver ID');
+  const d = findDriverById(driverId);
+  if (!d) throw new Error('Driver not found');
+  advanceOffers();
+  processFutureBookings();
+  const profile = {
+    id: d.id, name: d.name, vehicleType: d.vehicle_type, status: d.status,
+    settleBalance: Number(d.settle_balance) || 0, commissionRate: Number(d.commission_rate) || 0,
+    zone: driverZone(d), lastLat: Number(d.last_lat) || null, lastLng: Number(d.last_lng) || null,
+    lastLocationAt: d.last_location_at || null, availableSince: d.available_since || null
+  };
+  const jobs = getJobs().filter(j => j.driver_id === driverId).map(jobResponse);
+  const bids = getBids();
+  return {
+    profile,
+    jobs,
+    offers: getDriverOffers(driverId).offers,
+    otherDrivers: getAvailableDriversWithLocation(),
+    bidBoard: getBidBoard(driverId).jobs,
+    myBids: getMyBids(driverId).bids,
+    futureBookings: jobs.filter(j => j.status === 'SCHEDULED' || j.status === 'ASSIGNED'),
+    futureOffers: getDriverFutureOffers(driverId).offers
+  };
+}
+
 function setDriverAvailability(body, driverId) {
   const status = String(body.status || '').toUpperCase();
   if (!['AVAILABLE', 'BREAK', 'OFFLINE'].includes(status)) throw new Error('Invalid availability status');
@@ -1541,9 +1568,18 @@ function updateDriverLocation(body, driverId) {
     updateJob(job.id, { notes: JSON.stringify(n), updated_at: now });
   });
 
-  // Check ETA for ON_WAY jobs and send 5-min notification
+  // Check ETA for ON_WAY jobs and send 5-min notification, and auto-arrive when very close
   getJobs().filter(job => job.driver_id === driverId && job.status === 'ON_WAY').forEach(job => {
     const miles = distanceMiles(Number(lat), Number(lng), Number(job.pickup_lat), Number(job.pickup_lng));
+    if (miles <= 0.08) {
+      try {
+        setJobStatus(job.id, { status: 'ARRIVED' }, driverId);
+        Logger.log('Auto-arrived driver %s for job %s (distance %s mi)', driverId, job.id, miles);
+      } catch (e) {
+        Logger.log('Auto-arrival failed for job %s: %s', job.id, e.message);
+      }
+      return;
+    }
     const etaMins = Math.round(miles / 20 * 60);
     if (etaMins <= 5 && etaMins >= 0) {
       let n = {};

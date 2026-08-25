@@ -335,6 +335,24 @@ function DriverPageContent() {
     catch (err) { console.error(err); }
   }
 
+  async function loadDashboard(id = driverId) {
+    try {
+      const data = await apiGet('/driver/dashboard', driverAuth(id));
+      setProfile(data.profile);
+      if (data.profile?.lastLocationAt) {
+        const ageMs = Date.now() - new Date(data.profile.lastLocationAt).getTime();
+        if (ageMs >= 0 && ageMs < 120000) setLocationOk(true);
+      }
+      setJobs(data.jobs || []);
+      setOffers(data.offers || []);
+      setOtherDrivers(data.otherDrivers || []);
+      setBidBoard(data.bidBoard || []);
+      setMyBids(data.myBids || []);
+      setFutureBookings(data.futureBookings || []);
+      setFutureOffers(data.futureOffers || []);
+    } catch (err) { setError(err.message); }
+  }
+
   async function loadJobs(id = driverId) {
     try { const data = await apiGet('/driver/jobs', driverAuth(id)); setJobs(data.jobs); }
     catch (err) { setError(err.message); }
@@ -706,26 +724,16 @@ function DriverPageContent() {
   useEffect(() => {
     if (!loggedIn) return;
     let cancelled = false;
-    const run = async () => {
-      await Promise.all([loadJobs(), loadOffers(), loadProfile(), loadOtherDrivers()]);
-    };
-    run();
-    const id = setInterval(() => { if (!cancelled) run(); }, 15000);
+    loadDashboard();
+    const id = setInterval(() => { if (!cancelled) loadDashboard(); }, 15000);
     return () => { cancelled = true; clearInterval(id); };
   }, [loggedIn, driverId]);
 
   useEffect(() => {
     if (!loggedIn || !openPanel) return;
-    if (openPanel === 'bids') {
-      loadBidBoard(); loadMyBids();
-      const id = setInterval(() => { loadBidBoard(); loadMyBids(); }, 30000);
-      return () => clearInterval(id);
-    }
-    if (openPanel === 'future') {
-      loadFutureBookings(); loadFutureOffers();
-      const id = setInterval(() => { loadFutureBookings(); loadFutureOffers(); }, 30000);
-      return () => clearInterval(id);
-    }
+    // The single dashboard poll already includes bids/future data, so just refresh once
+    // when a panel is opened to avoid waiting for the next 15-second tick.
+    loadDashboard();
   }, [loggedIn, openPanel]);
 
   useEffect(() => {
@@ -1054,6 +1062,23 @@ function DriverPageContent() {
               </div>
             </div>
           </div>
+
+          {routeInfo.steps && routeInfo.steps.length > 1 && (
+            <div style={{ position: 'absolute', bottom: 160, left: 12, right: 12, zIndex: 1000, maxHeight: '28vh' }}>
+              <div className="card" style={{ padding: '0.55rem 0.7rem', borderRadius: 16, border: '1.5px solid var(--border-strong)', background: 'rgba(10,10,10,0.96)', overflowY: 'auto' }}>
+                {routeInfo.steps.slice(1).map((step, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0.45rem 0', borderBottom: i === routeInfo.steps.length - 2 ? 'none' : '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--surface)', color: 'var(--cream)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} dangerouslySetInnerHTML={{ __html: maneuverIconSvg(step.maneuver, 22) }} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--cream)', fontWeight: 600, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{step.instruction}</div>
+                      {step.road && <div style={{ fontSize: '0.65rem', color: 'var(--gold-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{step.road}</div>}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--cream-dim)', fontWeight: 700, flexShrink: 0 }}>{step.distance}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
 
