@@ -35,6 +35,12 @@ export default function CustomerPage() {
 
   const token = () => localStorage.getItem(SESSION_KEY) || '';
 
+  function registerPushToken(customerToken) {
+    const fcmToken = localStorage.getItem('fcmToken');
+    if (!fcmToken) return;
+    api('customer/register-push', { customerToken, fcmToken }).catch(err => console.error('Customer push registration failed:', err));
+  }
+
   useEffect(() => {
     if (token()) loadDashboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -71,6 +77,7 @@ export default function CustomerPage() {
       const result = await api('customer/login', { phone, pin });
       localStorage.setItem(SESSION_KEY, result.customerToken);
       setCustomer(result.customer); setPin('');
+      registerPushToken(result.customerToken);
       setMessage('Welcome back.');
       await loadDashboard();
     } catch (err) { setError(err.message); }
@@ -106,6 +113,7 @@ export default function CustomerPage() {
     try {
       const result = await api('customer/register', { name, phone, email, otp, pin });
       localStorage.setItem(SESSION_KEY, result.customerToken);
+      registerPushToken(result.customerToken);
       for (const p of registerPlaces) {
         await api('customer/places/add', { customerToken: result.customerToken, ...p });
       }
@@ -135,6 +143,7 @@ export default function CustomerPage() {
     try {
       const result = await api('customer/reset-pin', { phone, otp: forgotOtp, pin: forgotPin, confirmPin: forgotConfirmPin });
       localStorage.setItem(SESSION_KEY, result.customerToken);
+      registerPushToken(result.customerToken);
       setCustomer(result.customer); resetForm();
       setMessage('Your PIN has been reset.');
       await loadDashboard();

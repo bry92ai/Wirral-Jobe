@@ -1,5 +1,8 @@
 package com.wirraljobe.app;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.graphics.PixelFormat;
@@ -16,6 +19,8 @@ import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.app.NotificationCompat;
+
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -30,6 +35,8 @@ import java.util.concurrent.Executors;
 public class FloatingOfferService extends Service {
 
     private static final String TAG = "FloatingOfferService";
+    private static final int NOTIFICATION_ID = 1;
+    private static final String CHANNEL_ID = "floating_offers";
 
     private String apiUrl = "https://wirraljobe.com/";
 
@@ -46,6 +53,7 @@ public class FloatingOfferService extends Service {
     public void onCreate() {
         super.onCreate();
         executor = Executors.newSingleThreadExecutor();
+        createNotificationChannel();
     }
 
     @Override
@@ -69,9 +77,11 @@ public class FloatingOfferService extends Service {
             return START_NOT_STICKY;
         }
 
+        startForeground(NOTIFICATION_ID, buildForegroundNotification());
+
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "Allow display over other apps for floating offers", Toast.LENGTH_LONG).show();
-            stopSelf();
+            removeFloatingView();
             return START_NOT_STICKY;
         }
 
@@ -82,6 +92,28 @@ public class FloatingOfferService extends Service {
         }
 
         return START_NOT_STICKY;
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationChannel channel = new NotificationChannel(
+            CHANNEL_ID,
+            "Floating offers",
+            NotificationManager.IMPORTANCE_LOW
+        );
+        channel.setDescription("Shown while a job offer overlay is active");
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager != null) manager.createNotificationChannel(channel);
+    }
+
+    private Notification buildForegroundNotification() {
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Job offer")
+            .setContentText("Tap to view the current job offer")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build();
     }
 
     private void showFloatingWindow(String jobId, String driverId, String acceptToken, String declineToken,
@@ -222,6 +254,11 @@ public class FloatingOfferService extends Service {
                 Log.e(TAG, "Error removing floating view", e);
             }
             floatingView = null;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE);
+        } else {
+            stopForeground(true);
         }
         stopSelf();
     }

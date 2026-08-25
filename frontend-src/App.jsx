@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { api } from './lib/api.js';
 import BookingPage from './pages/BookingPage.jsx';
 import TrackingPage from './pages/TrackingPage.jsx';
@@ -24,11 +25,22 @@ export default function App() {
   const navigate = useNavigate();
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
+
     PushNotifications.requestPermissions().then(res => {
       if (res.receive === 'granted') {
         PushNotifications.register();
       }
     }).catch(err => console.error('Push permission error:', err));
+
+    LocalNotifications.createChannel({
+      id: 'job_offers',
+      name: 'Job Offers',
+      description: 'New job offer alerts and customer updates',
+      importance: 5,
+      visibility: 1,
+      vibration: true
+    }).catch(err => console.error('Create notification channel error:', err));
+
     PushNotifications.addListener('registration', token => {
       localStorage.setItem('fcmToken', token.value);
       const customerToken = localStorage.getItem(SESSION_KEY);
@@ -44,13 +56,26 @@ export default function App() {
       console.error('Push registration error:', err);
     });
     PushNotifications.addListener('pushNotificationReceived', notification => {
-      // Notification received in foreground
+      // Foreground push: mirror it as a local notification so the user still sees it.
+      LocalNotifications.schedule({
+        notifications: [{
+          id: Date.now(),
+          channelId: 'job_offers',
+          title: notification.title || 'Wirral Jobe',
+          body: notification.body || '',
+          extra: notification.data || {}
+        }]
+      }).catch(err => console.error('Schedule local notification error:', err));
     });
     PushNotifications.addListener('pushNotificationActionPerformed', action => {
       const data = action.notification?.data;
       if (data?.route) {
         navigate(data.route);
       }
+    });
+    LocalNotifications.addListener('localNotificationActionPerformed', action => {
+      const route = action.notification?.extra?.route;
+      if (route) navigate(route);
     });
   }, [navigate]);
 

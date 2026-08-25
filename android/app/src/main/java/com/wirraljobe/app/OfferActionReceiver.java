@@ -6,6 +6,8 @@ import android.content.Intent;
 import android.util.Log;
 import android.widget.Toast;
 
+import androidx.core.content.ContextCompat;
+
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -83,7 +85,7 @@ public class OfferActionReceiver extends BroadcastReceiver {
         showIntent.putExtra("pickup", intent.getStringExtra("pickup"));
         showIntent.putExtra("dropoff", intent.getStringExtra("dropoff"));
         showIntent.putExtra("fare", intent.getStringExtra("fare"));
-        context.startService(showIntent);
+        ContextCompat.startForegroundService(context, showIntent);
     }
 
     private void sendSecureAction(Context context, String apiUrl, String jobId, String driverId, String secureAction, String token) {
