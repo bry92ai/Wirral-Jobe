@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import { api, apiGet } from '../lib/api.js';
 import { FLIGHTPATH_ZONES, findZone, getZoneName } from '../lib/zones.js';
 import { distanceMiles } from '../lib/geo.js';
-import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg, coinIcon } from '../lib/leaflet.js';
+import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg, coinIcon, maneuverIconSvg } from '../lib/leaflet.js';
 import { startDriverService, updateDriverService, stopDriverService } from '../lib/driverService.js';
 import { Geolocation } from '@capacitor/geolocation';
+import { Capacitor } from '@capacitor/core';
 import DriverRouteLayer from '../components/DriverRouteLayer.jsx';
 import logo from '../assets/logo.jpg';
 
@@ -263,6 +264,7 @@ function DriverPageContent() {
     setError(''); setLoading(true);
     try {
       const res = await api('driver/login', { driverId: driverId.toUpperCase(), pin });
+      setDriverId(res.driverId);
       localStorage.setItem('driverId', res.driverId);
       localStorage.setItem('driverName', res.name);
       localStorage.setItem('driverToken', res.token);
@@ -657,16 +659,41 @@ function DriverPageContent() {
 
   useEffect(() => {
     if (!loggedIn) return;
-    loadJobs(); loadOffers(); loadProfile(); loadOtherDrivers();
-    const id = setInterval(() => { loadJobs(); loadOffers(); loadProfile(); loadOtherDrivers(); loadBidBoard(); loadMyBids(); loadFutureBookings(); loadFutureOffers(); }, 5000);
-    return () => clearInterval(id);
+    let cancelled = false;
+    const run = async () => {
+      await Promise.all([loadJobs(), loadOffers(), loadProfile(), loadOtherDrivers()]);
+    };
+    run();
+    const id = setInterval(() => { if (!cancelled) run(); }, 15000);
+    return () => { cancelled = true; clearInterval(id); };
   }, [loggedIn, driverId]);
+
+  useEffect(() => {
+    if (!loggedIn || !openPanel) return;
+    if (openPanel === 'bids') {
+      loadBidBoard(); loadMyBids();
+      const id = setInterval(() => { loadBidBoard(); loadMyBids(); }, 30000);
+      return () => clearInterval(id);
+    }
+    if (openPanel === 'future') {
+      loadFutureBookings(); loadFutureOffers();
+      const id = setInterval(() => { loadFutureBookings(); loadFutureOffers(); }, 30000);
+      return () => clearInterval(id);
+    }
+  }, [loggedIn, openPanel]);
 
   useEffect(() => {
     if (!loggedIn) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [loggedIn]);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    const age = lastLocationSentAt ? now - lastLocationSentAt : Infinity;
+    const shouldBeOk = age >= 0 && age < 120000;
+    if (locationOk !== shouldBeOk) setLocationOk(shouldBeOk);
+  }, [loggedIn, now, lastLocationSentAt, locationOk]);
 
   useEffect(() => {
     if (!selectedBid) return;
@@ -686,7 +713,10 @@ function DriverPageContent() {
     setLocationError('');
     let mounted = true;
 
+    const nativeLocationActive = Capacitor.isNativePlatform();
+
     function sendLocation(lat, lng, zone, accuracy) {
+      if (nativeLocationActive) return; // native DriverForegroundService already sends location updates
       api('driver/location', { lat, lng, zone, accuracy }, driverAuth())
         .then(() => {
           lastLocationUpdateRef.current = Date.now(); setLastLocationSentAt(Date.now());
@@ -705,6 +735,11 @@ function DriverPageContent() {
       setLocationOk(true);
       setLocationError('');
       lastGpsReadingRef.current = Date.now();
+      if (nativeLocationActive) {
+        // The native DriverForegroundService is responsible for sending this position to the backend;
+        // update the local freshness indicator so the UI doesn't go stale.
+        setLastLocationSentAt(Date.now());
+      }
       if (h != null && !Number.isNaN(h)) setHeading(h);
       if (!Number.isFinite(accuracy) || accuracy > 200) {
         setLocationError('GPS signal is weak. Move outside or wait for a better fix.');
@@ -912,21 +947,37 @@ function DriverPageContent() {
       )}
 
       {mapMode === 'route' && routeInfo && (
-        <div style={{ position: 'absolute', top: 12, left: 12, right: 90, zIndex: 1000 }}>
-          <div className="card" style={{ padding: '0.75rem 1rem', borderRadius: 14, border: '1.5px solid var(--gold)', background: 'rgba(10,10,10,0.92)' }}>
-            <div style={{ fontSize: '0.65rem', color: 'var(--gold)', fontWeight: 800, textTransform: 'uppercase' }}>{routeInfo.targetLabel}</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--cream)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{routeInfo.targetAddress}</div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: '0.75rem', color: 'var(--cream-dim)' }}>
-              <span>{routeInfo.distanceText}</span>
-              <span>{routeInfo.durationText}</span>
-            </div>
-            {routeInfo.steps && routeInfo.steps[0] && (
-              <div style={{ marginTop: 4, fontSize: '0.75rem', color: 'var(--cream)' }}>
-                Next: {routeInfo.steps[0].instruction}
+        <>
+          <div style={{ position: 'absolute', top: 12, left: 12, right: 90, zIndex: 1000 }}>
+            <div className="card" style={{ padding: '1rem 1.1rem', borderRadius: 18, border: '1.5px solid var(--gold)', background: 'rgba(10,10,10,0.95)', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--gold)', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} dangerouslySetInnerHTML={{ __html: maneuverIconSvg(routeInfo.steps?.[0]?.maneuver, 38) }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: '0.95rem', color: 'var(--cream)', fontWeight: 800, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{routeInfo.steps?.[0]?.instruction || 'Head to ' + routeInfo.targetLabel}</div>
+                {routeInfo.steps?.[0]?.road && <div style={{ fontSize: '0.75rem', color: 'var(--gold)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{routeInfo.steps[0].road}</div>}
+                <div style={{ fontSize: '1.35rem', color: 'var(--cream)', fontWeight: 900, marginTop: 2, fontFamily: 'var(--font-display)' }}>{routeInfo.steps?.[0]?.distance || routeInfo.distanceText}</div>
               </div>
-            )}
+            </div>
           </div>
-        </div>
+
+          <div style={{ position: 'absolute', bottom: 84, left: 12, right: 12, zIndex: 1000 }}>
+            <div className="card" style={{ padding: '0.75rem 1rem', borderRadius: 16, border: '1.5px solid var(--border-strong)', background: 'rgba(10,10,10,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ textAlign: 'center', flex: 1 }}>
+                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 700, textTransform: 'uppercase' }}>Arrival</div>
+                <div style={{ fontSize: '1.1rem', color: 'var(--cream)', fontWeight: 800 }}>{routeInfo.durationText}</div>
+              </div>
+              <div style={{ width: 1, height: 32, background: 'var(--border)' }} />
+              <div style={{ textAlign: 'center', flex: 1 }}>
+                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 700, textTransform: 'uppercase' }}>Distance</div>
+                <div style={{ fontSize: '1.1rem', color: 'var(--cream)', fontWeight: 800 }}>{routeInfo.distanceText}</div>
+              </div>
+              <div style={{ width: 1, height: 32, background: 'var(--border)' }} />
+              <div style={{ textAlign: 'center', flex: 1 }}>
+                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 700, textTransform: 'uppercase' }}>Target</div>
+                <div style={{ fontSize: '1.1rem', color: 'var(--gold)', fontWeight: 800 }}>{routeInfo.targetLabel}</div>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       <div style={{

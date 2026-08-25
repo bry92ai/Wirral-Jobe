@@ -64,6 +64,22 @@ export const policeIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28"
 
 export const hazardIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><path d="M12 2L1 22h22L12 2z" fill="#f59e0b" stroke="white" stroke-width="1.5"/><path d="M12 8v7M12 17h.01" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg>`;
 
+function arrowPath(maneuver) {
+  const m = String(maneuver || '').toLowerCase();
+  if (m.includes('sharp-left')) return '<path d="M16 4L6 12l10 8V4z" transform="rotate(-45 11 12)"/>';
+  if (m.includes('sharp-right')) return '<path d="M16 4L6 12l10 8V4z" transform="rotate(45 11 12)"/>';
+  if (m.includes('uturn')) return '<path d="M12 4v10c0 2.2-1.8 4-4 4s-4-1.8-4-4V6h2v8c0 1.1.9 2 2 2s2-.9 2-2V6h4"/>';
+  if (m.includes('roundabout-left') || m.includes('roundabout-right')) return '<path d="M12 2a7 7 0 1 1 0 14 7 7 0 0 1 0-14zm0 3v4l3 3"/>';
+  if (m.includes('ramp-left') || m.includes('fork-left') || m.includes('keep-left') || m.includes('end-of-road-left') || m.includes('turn-left')) return '<path d="M18 6L8 12l10 6V6z"/>';
+  if (m.includes('ramp-right') || m.includes('fork-right') || m.includes('keep-right') || m.includes('end-of-road-right') || m.includes('turn-right')) return '<path d="M6 6l10 6-10 6V6z"/>';
+  return '<path d="M6 12h12M13 5l7 7-7 7"/>'; // straight / default
+}
+
+export function maneuverIconSvg(maneuver, size = 56) {
+  const path = arrowPath(maneuver);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+}
+
 export function coinIconHtml(size = 32) {
   return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:linear-gradient(135deg,#ffd700,#d4af37);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;color:#3a2e08;font-weight:900;font-size:${Math.round(size * 0.55)}px;line-height:1">£</div>`;
 }

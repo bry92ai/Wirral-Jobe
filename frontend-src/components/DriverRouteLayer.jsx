@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { divIcon, pickupIconSvg, dropoffIconSvg, speedCameraIconSvg, policeIconSvg } from '../lib/leaflet.js';
 
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+const API_BASE = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/+$/, '');
 
 function decodePolyline(encoded, precision = 5) {
   const factor = Math.pow(10, precision);
@@ -71,7 +71,7 @@ function padBounds(points, padding = 0.01) {
 async function fetchDirections(origin, destination) {
   const originStr = `${origin.lat},${origin.lng}`;
   const destStr = `${destination.lat},${destination.lng}`;
-  const url = `/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`;
+  const url = `${API_BASE}/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`;
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error('Directions request failed');
   const data = await res.json();
@@ -83,12 +83,24 @@ async function fetchDirections(origin, destination) {
     path,
     distanceText: leg.distance.text,
     durationText: leg.duration.text,
-    steps: leg.steps.map(s => ({
+    etaSeconds: leg.duration.value,
+    steps: leg.steps.map((s, i) => ({
       instruction: s.html_instructions ? s.html_instructions.replace(/<[^>]+>/g, '') : '',
       distance: s.distance?.text,
-      maneuver: s.maneuver
+      distanceValue: s.distance?.value,
+      duration: s.duration?.text,
+      maneuver: s.maneuver || (i === 0 ? 'straight' : ''),
+      road: s.html_instructions ? extractRoadName(s.html_instructions) : ''
     }))
   };
+}
+
+function extractRoadName(html) {
+  // Try to pull a road name from <b> tags in the instruction
+  const matches = html.match(/<b>([^<]+)<\/b>/g);
+  if (!matches) return '';
+  const names = matches.map(m => m.replace(/<\/?b>/g, '')).filter(n => n.length > 1);
+  return names[names.length - 1] || '';
 }
 
 async function fetchOsmHazards(bounds) {

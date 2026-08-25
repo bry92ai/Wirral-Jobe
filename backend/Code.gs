@@ -1900,9 +1900,13 @@ function confirmReturnPair(body) {
   const returnJob = movePendingToJob(returnPendingBookingId, { status: 'SCHEDULED', payment_id: paymentId, payment_status: 'BOOKING_FEE_PAID', updated_at: now });
   if (!outboundJob || !returnJob) throw new Error('Could not confirm both journeys. Please try again.');
 
+  // Link the two legs so two-way-specific SMS templates and driver offers are used.
+  updateJob(outboundJob.id, { return_job_id: returnJob.id, updated_at: now });
+  updateJob(returnJob.id, { return_job_id: outboundJob.id, updated_at: now });
+
   writeAudit('customer', outboundJob.customer_id || outboundJob.customer_phone, 'booking_confirmed', 'job', outboundPendingBookingId + ',' + returnPendingBookingId, { provider: squarePaymentsEnabled() ? 'square' : 'none', paymentId: paymentId || '', amount: Number(outboundJob.booking_fee) + Number(returnJob.booking_fee) });
-  sendBookingConfirmedSms(outboundJob);
-  sendBookingConfirmedSms(returnJob);
+  sendBookingConfirmedSms(findJobById(outboundJob.id));
+  sendBookingConfirmedSms(findJobById(returnJob.id));
 
   createFutureOffer(outboundPendingBookingId, Number(outboundJob.pickup_lat), Number(outboundJob.pickup_lng));
   createFutureOffer(returnPendingBookingId, Number(returnJob.pickup_lat), Number(returnJob.pickup_lng));

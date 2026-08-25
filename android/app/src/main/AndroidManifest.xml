@@ -47,7 +47,7 @@
 
         <receiver
             android:name=".OfferActionReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="com.wirraljobe.app.action.ACCEPT_OFFER" />
                 <action android:name="com.wirraljobe.app.action.DECLINE_OFFER" />
