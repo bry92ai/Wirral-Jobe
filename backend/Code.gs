@@ -1027,9 +1027,7 @@ function createSquarePaymentForAmount(amount, sourceId, referenceId, note) {
     reference_id: referenceId,
     note: note || 'The Wirral Jobe booking fee'
   };
-  const isSandbox = String(properties.getProperty('SQUARE_SANDBOX') || '').toLowerCase() === 'true';
-  const squareEndpoint = isSandbox ? 'https://connect.squareupsandbox.com/v2/payments' : 'https://connect.squareup.com/v2/payments';
-  const response = UrlFetchApp.fetch(squareEndpoint, {
+  const response = UrlFetchApp.fetch('https://connect.squareup.com/v2/payments', {
     method: 'post',
     contentType: 'application/json',
     headers: { Authorization: 'Bearer ' + accessToken, 'Square-Version': '2024-06-04' },
