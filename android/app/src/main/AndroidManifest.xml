@@ -45,6 +45,14 @@
             android:exported="false"
             android:foregroundServiceType="specialUse" />
 
+        <service
+            android:name=".WirralJobeMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".OfferActionReceiver"
             android:exported="false">

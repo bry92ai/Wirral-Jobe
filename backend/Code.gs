@@ -1207,7 +1207,11 @@ function sendPushNotification(fcmToken, title, body, data) {
     defaultVibrateTimings: true,
     visibility: 'VISIBILITY_PUBLIC'
   };
-  if (isOffer && data.acceptToken && data.declineToken) {
+  // For job offers we send a data-only message so the custom Android service can
+  // build a notification with Accept/Decline action buttons and avoid a duplicate
+  // system notification.
+  const offerWithActions = isOffer && data.acceptToken && data.declineToken;
+  if (offerWithActions) {
     notification.actions = [
       { title: 'Accept', action: 'com.wirraljobe.app.action.ACCEPT_OFFER' },
       { title: 'Decline', action: 'com.wirraljobe.app.action.DECLINE_OFFER' },
@@ -1216,13 +1220,15 @@ function sendPushNotification(fcmToken, title, body, data) {
   }
   const message = {
     token: fcmToken,
-    notification: { title: title || '', body: body || '' },
-    data: data || {},
+    data: Object.assign({}, data || {}, { title: title || '', body: body || '' }),
     android: {
       priority: 'high',
       notification: notification
     }
   };
+  if (!offerWithActions) {
+    message.notification = { title: title || '', body: body || '' };
+  }
   try {
     const res = UrlFetchApp.fetch('https://fcm.googleapis.com/v1/projects/' + projectId + '/messages:send', {
       method: 'post', contentType: 'application/json',
