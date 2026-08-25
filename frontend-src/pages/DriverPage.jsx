@@ -582,6 +582,40 @@ function DriverPageContent() {
   }, [mapReady, mapMode, offers, bidBoard, otherDrivers, jobs]);
 
   useEffect(() => {
+    if (!mapReady || !mapObjRef.current) return;
+    const map = mapObjRef.current;
+    const inRouteMode = mapMode === 'route';
+    try {
+      if (inRouteMode) {
+        map.dragging.disable();
+        map.touchZoom.disable();
+        map.scrollWheelZoom.disable();
+        map.doubleClickZoom.disable();
+        map.boxZoom.disable();
+        if (map.keyboard) map.keyboard.disable();
+      } else {
+        map.dragging.enable();
+        map.touchZoom.enable();
+        map.scrollWheelZoom.enable();
+        map.doubleClickZoom.enable();
+        map.boxZoom.enable();
+        if (map.keyboard) map.keyboard.enable();
+      }
+    } catch (e) { console.warn(e); }
+  }, [mapReady, mapMode]);
+
+  useEffect(() => {
+    if (!mapReady || !mapObjRef.current || !myLocation) return;
+    const map = mapObjRef.current;
+    if (mapMode === 'route') {
+      if (map.getZoom() < 18) map.setZoom(18);
+      map.panTo([myLocation.lat, myLocation.lng]);
+    } else {
+      if (map.getZoom() > 16) map.setZoom(14);
+    }
+  }, [mapMode, myLocation, heading, mapReady]);
+
+  useEffect(() => {
     if (!mapReady || !geoJsonLayerRef.current) return;
     geoJsonLayerRef.current.setStyle(feature => getZoneStyle(feature, currentZoneId, selectedZoneId));
   }, [mapReady, currentZoneId, selectedZoneId]);
@@ -874,6 +908,12 @@ function DriverPageContent() {
 
   return (
     <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+      <style>{`
+        .route-mode-map .custom-marker:not(.self-marker) > div {
+          transform: rotate(var(--map-heading, 0deg)) !important;
+          transform-origin: center center !important;
+        }
+      `}</style>
       <div style={{ position: 'absolute', top: 12, left: 12, right: 12, zIndex: 1000 }} className="wj-driver-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <img src={logo} alt="" className="logo-badge" />
@@ -911,7 +951,22 @@ function DriverPageContent() {
         </div>
       )}
 
-      <div ref={mapRef} style={{ flex: 1, minHeight: 0 }} />
+      <div className={mapMode === 'route' ? 'route-mode-map' : ''} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <div
+          ref={mapRef}
+          style={{
+            position: 'absolute',
+            top: '-25%',
+            left: '-25%',
+            width: '150%',
+            height: '150%',
+            transform: `rotate(${mapMode === 'route' && heading != null ? -heading : 0}deg)`,
+            transformOrigin: 'center center',
+            transition: 'transform 0.25s linear',
+            '--map-heading': mapMode === 'route' && heading != null ? `${heading}deg` : '0deg'
+          }}
+        />
+      </div>
       {mapReady && (
         <DriverRouteLayer
           map={mapObjRef.current}
@@ -920,6 +975,7 @@ function DriverPageContent() {
           activeJob={activeJob}
           visible={mapMode === 'route'}
           onRouteInfo={setRouteInfo}
+          fitMap={false}
         />
       )}
 
