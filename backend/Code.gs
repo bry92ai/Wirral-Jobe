@@ -1168,7 +1168,7 @@ function driverRegisterPush(body) {
 function getFcmAccessToken() {
   const props = PropertiesService.getScriptProperties();
   const email = props.getProperty('FCM_CLIENT_EMAIL');
-  const key = props.getProperty('FCM_PRIVATE_KEY');
+  const key = (props.getProperty('FCM_PRIVATE_KEY') || '').replace(/\\n/g, '\n').trim();
   const projectId = props.getProperty('FCM_PROJECT_ID');
   if (!email || !key || !projectId) return null;
   const now = Math.floor(Date.now() / 1000);
