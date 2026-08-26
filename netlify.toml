@@ -4,7 +4,7 @@
   functions = "netlify/functions"
 
 [build.environment]
-  GAS_URL = "https://script.google.com/macros/s/AKfycbylnvNbM12CKJjVY6jxU_hHKP9nG1ctzIqhdE4azQ874lVwF73Qi84DHiqhn5NWnBdi/exec"
+  GAS_URL = "https://script.google.com/macros/s/AKfycbxSMNjHjx7s68SxM0r4Y7A2Kly844kDTVkEC--FYHL5W069IUgVFenRPI98GUUgjrjW/exec"
 # NOTE: The live GAS_URL for the Netlify function is set via the Netlify UI environment variable.
 #       Update it there as well after creating a new Apps Script deployment.
 

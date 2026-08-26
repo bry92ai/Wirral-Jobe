@@ -32,6 +32,8 @@ export default function CustomerPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [authStep, setAuthStep] = useState('login');
+  const [cancellingJob, setCancellingJob] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
 
   const token = () => localStorage.getItem(SESSION_KEY) || '';
 
@@ -193,6 +195,20 @@ export default function CustomerPage() {
     finally { setLoading(false); }
   }
 
+  async function cancelJob(jobId) {
+    if (!cancelReason) { setError('Please choose a reason'); return; }
+    setLoading(true); setError(''); setMessage('');
+    try {
+      await api('customer/cancel-job', { customerToken: token(), jobId, reason: cancelReason });
+      setCancellingJob(null); setCancelReason('');
+      setMessage('Booking cancelled.');
+      await loadDashboard();
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  const CANCEL_REASONS = ['Plans changed', 'Booked accidentally', 'No longer travelling', 'Driver taking too long', 'Other'];
+
   if (!customer) {
     return <div className="wj-shell"><div className="wj-frame wj-customer-auth">
       <img src={logo} alt="The Wirral Jobe" className="wj-logo" />
@@ -308,8 +324,29 @@ export default function CustomerPage() {
     <Link to="/" className="wj-customer-book">Book a ride <b>›</b></Link>
     {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
     <section className="wj-customer-section"><h2>Your bookings</h2><div className="wj-customer-tabs"><button className={tab === 'future' ? 'active' : ''} onClick={() => setTab('future')}>Future ({futureJobs.length})</button><button className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>Past ({pastJobs.length})</button></div>
-      {shownJobs.length === 0 ? <p className="wj-customer-empty">No {tab} bookings yet.</p> : shownJobs.map(job => <article className="wj-customer-job" key={job.jobId}><div><span className={`badge status-${job.status || 'NEW'}`}>{(job.status || 'NEW').replace('_', ' ')}</span><time>{dateLabel(job.pickupTime)}</time></div><strong>{job.pickupAddress}</strong><i>↓</i><strong>{job.dropoffAddress}</strong><footer><span>{job.vehicleType === 'mpv' ? 'MPV' : 'Saloon / estate'}</span><b>Maximum £{Number(job.fare || 0).toFixed(2)}</b></footer></article>)}
+      {shownJobs.length === 0 ? <p className="wj-customer-empty">No {tab} bookings yet.</p> : shownJobs.map(job => {
+        const canCancel = !['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(job.status);
+        return (<article className="wj-customer-job" key={job.jobId}><div><span className={`badge status-${job.status || 'NEW'}`}>{(job.status || 'NEW').replace('_', ' ')}</span><time>{dateLabel(job.pickupTime)}</time></div><strong>{job.pickupAddress}</strong><i>↓</i><strong>{job.dropoffAddress}</strong><footer><span>{job.vehicleType === 'mpv' ? 'MPV' : 'Saloon / estate'}</span><b>Maximum £{Number(job.fare || 0).toFixed(2)}</b>{canCancel && <button className="wj-text-button" style={{ marginLeft: 'auto', color: 'var(--danger)' }} onClick={() => setCancellingJob(job)}>Cancel</button>}</footer></article>);
+      })}
     </section>
+    {cancellingJob && (
+      <div className="wj-modal" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <div style={{ background: 'var(--surface)', padding: '1.5rem', borderRadius: 12, maxWidth: 360, width: '90%' }}>
+          <h3 style={{ marginBottom: '0.75rem' }}>Cancel booking</h3>
+          <p style={{ marginBottom: '0.75rem', color: 'var(--muted)' }}>Please let us know why.</p>
+          {CANCEL_REASONS.map(r => (
+            <label key={r} style={{ display: 'block', margin: '0.4rem 0', cursor: 'pointer' }}>
+              <input type="radio" name="cancelReason" value={r} checked={cancelReason === r} onChange={e => setCancelReason(e.target.value)} /> {r}
+            </label>
+          ))}
+          {error && <p className="error">{error}</p>}
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+            <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setCancellingJob(null)}>Close</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} disabled={loading} onClick={() => cancelJob(cancellingJob.jobId)}>{loading ? 'Cancelling…' : 'Confirm cancel'}</button>
+          </div>
+        </div>
+      </div>
+    )}
     <section className="wj-customer-section"><h2>Saved places</h2><p className="wj-customer-copy">Save your regular pickup and drop-off locations for future bookings.</p>
       <div className="wj-saved-places">{places.length === 0 && <p className="wj-customer-empty">No saved places yet.</p>}{places.map(place => <article key={place.id}><span>{place.type === 'pickup' ? '↑' : '↓'}</span><div><strong>{place.label}</strong><small>{place.address}</small></div><button onClick={() => removePlace(place.id)} disabled={loading} aria-label={`Remove ${place.label}`}>×</button></article>)}</div>
       <form className="wj-place-form" onSubmit={savePlace}><div className="form-group"><label>Place name</label><input value={placeForm.label} onChange={e => setPlaceForm({ ...placeForm, label: e.target.value })} placeholder="e.g. Home" /></div><div className="form-group"><label>Address</label><input value={placeForm.address} onChange={e => setPlaceForm({ ...placeForm, address: e.target.value })} placeholder="Full address" /></div><div className="wj-place-coordinates"><div className="form-group"><label>Latitude</label><input type="number" step="any" value={placeForm.lat} onChange={e => setPlaceForm({ ...placeForm, lat: e.target.value })} placeholder="53.39" /></div><div className="form-group"><label>Longitude</label><input type="number" step="any" value={placeForm.lng} onChange={e => setPlaceForm({ ...placeForm, lng: e.target.value })} placeholder="-3.02" /></div></div><div className="wj-place-type"><button type="button" className={placeForm.type === 'pickup' ? 'active' : ''} onClick={() => setPlaceForm({ ...placeForm, type: 'pickup' })}>Pickup</button><button type="button" className={placeForm.type === 'dropoff' ? 'active' : ''} onClick={() => setPlaceForm({ ...placeForm, type: 'dropoff' })}>Drop-off</button></div><button className="btn btn-outline" disabled={loading}>Save place</button></form>

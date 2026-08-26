@@ -1957,7 +1957,10 @@ function createBooking(body) {
     flightNumber: p.flightNumber || '',
     childSeats: p.childSeats || '',
     accessibility: p.accessibility || '',
-    customerNotes: p.customerNotes || ''
+    customerNotes: p.customerNotes || '',
+    bookingForSomeoneElse: !!p.bookingForSomeoneElse,
+    passengerName: p.passengerName || '',
+    passengerPhone: p.passengerPhone || ''
   };
   Logger.log('createBooking: pendingBookingId=%s (free booking)', jobId);
 

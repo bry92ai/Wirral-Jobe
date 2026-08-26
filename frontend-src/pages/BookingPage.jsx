@@ -215,6 +215,9 @@ export default function BookingPage() {
   const [accessibility, setAccessibility] = useState('');
   const [customerNotes, setCustomerNotes] = useState('');
   const [showExtras, setShowExtras] = useState(false);
+  const [bookingForSomeoneElse, setBookingForSomeoneElse] = useState(false);
+  const [passengerName, setPassengerName] = useState('');
+  const [passengerPhone, setPassengerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerToken, setCustomerToken] = useState(() => localStorage.getItem('wirralCustomerToken') || '');
@@ -520,7 +523,8 @@ export default function BookingPage() {
         ...(isAirport && flightNumber ? { flightNumber } : {}),
         ...(childSeats ? { childSeats } : {}),
         ...(accessibility ? { accessibility } : {}),
-        customerNotes
+        customerNotes,
+        ...(bookingForSomeoneElse ? { bookingForSomeoneElse: true, passengerName: passengerName.trim(), passengerPhone: passengerPhone.trim() } : {})
       };
       if (!returnTrip) {
         const outbound = await api('booking', booking);
@@ -560,7 +564,8 @@ export default function BookingPage() {
           ...(isAirport && flightNumber ? { flightNumber } : {}),
           ...(childSeats ? { childSeats } : {}),
           ...(accessibility ? { accessibility } : {}),
-          customerNotes
+          customerNotes,
+          ...(bookingForSomeoneElse ? { bookingForSomeoneElse: true, passengerName: passengerName.trim(), passengerPhone: passengerPhone.trim() } : {})
         };
         const pair = await api('booking/return-pair', { outbound: booking, return: returnBooking });
         if (pair.error) throw new Error(pair.error);
@@ -616,7 +621,8 @@ export default function BookingPage() {
       ...(isAirport && flightNumber ? { flightNumber } : {}),
       ...(childSeats ? { childSeats } : {}),
       ...(accessibility ? { accessibility } : {}),
-      customerNotes
+      customerNotes,
+      ...(bookingForSomeoneElse ? { bookingForSomeoneElse: true, passengerName: passengerName.trim(), passengerPhone: passengerPhone.trim() } : {})
     });
     if (returnData.error) throw new Error(returnData.error);
     setReturnResult({ ...returnData, jobId: returnData.pendingBookingId });
@@ -974,6 +980,22 @@ export default function BookingPage() {
               </>
             )}
             <textarea className="wj-details-input" style={{ minHeight: 80, paddingTop: 12 }} value={customerNotes} onChange={e => setCustomerNotes(e.target.value)} placeholder="Any other notes for the driver" />
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0', fontSize: '0.95rem', cursor: 'pointer' }}>
+              <input type="checkbox" checked={bookingForSomeoneElse} onChange={e => setBookingForSomeoneElse(e.target.checked)} />
+              I'm booking this journey for someone else
+            </label>
+            {bookingForSomeoneElse && (
+              <>
+                <div className="wj-details-input">
+                  <span aria-hidden="true">👤</span>
+                  <input type="text" value={passengerName} onChange={e => setPassengerName(e.target.value)} placeholder="Passenger name" />
+                </div>
+                <div className="wj-details-input">
+                  <span aria-hidden="true">📞</span>
+                  <input type="tel" value={passengerPhone} onChange={e => setPassengerPhone(e.target.value)} placeholder="Passenger mobile number" />
+                </div>
+              </>
+            )}
             {isFuture && (
               <input className="wj-details-datetime" type="datetime-local" value={pickupTime} min={toIsoLocal(new Date())} onChange={e => setPickupTime(e.target.value)} />
             )}
