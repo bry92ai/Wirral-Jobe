@@ -10,7 +10,9 @@ export default function AdminPage() {
   const [applications, setApplications] = useState([]);
   const [error, setError] = useState('');
   const [token, setToken] = useState(localStorage.getItem('adminToken') || '');
-  const [password, setPassword] = useState('');
+  const [adminEmail, setAdminEmail] = useState(localStorage.getItem('adminEmail') || '');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [newDriver, setNewDriver] = useState({ id: '', name: '', phone: '', pin: '', vehicle_type: 'car', license_type: 'private_hire', vehicle_make_model_colour: '', reg_last_3: '', expiry_date: '', badge_number: '', commission_rate: '', letter: '' });
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -101,9 +103,11 @@ export default function AdminPage() {
     e.preventDefault();
     setError('');
     try {
-      const res = await api('admin/login', { password });
+      const res = await api('admin/login', { email: loginEmail, password: loginPassword });
       localStorage.setItem('adminToken', res.token);
+      localStorage.setItem('adminEmail', res.email);
       setToken(res.token);
+      setAdminEmail(res.email);
     } catch (err) {
       setError(err.message);
     }
@@ -368,8 +372,12 @@ export default function AdminPage() {
           <h1 className="wj-title" style={{ textAlign: 'center', fontSize: '1.3rem' }}>Admin login</h1>
           <form onSubmit={login}>
             <div className="form-group">
+              <label>Email</label>
+              <input type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="bry92ai@gmail.com" required />
+            </div>
+            <div className="form-group">
               <label>Password</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="admin" />
+              <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="admin" required />
             </div>
             <button type="submit" className="btn btn-primary">Log in</button>
             {error && <p className="error">{error}</p>}
@@ -386,7 +394,7 @@ export default function AdminPage() {
         <h1 style={{ margin: 0 }}>Dispatch board</h1>
         {error && <p className="error">{error}</p>}
         {mapError && <p className="error">Map: {mapError}</p>}
-        <button onClick={() => { localStorage.removeItem('adminToken'); setToken(''); }}>Log out</button>
+        <button onClick={() => { localStorage.removeItem('adminToken'); localStorage.removeItem('adminEmail'); setToken(''); setAdminEmail(''); }}>Log out</button>
       </div>
 
       <details className="wj-admin-section card" open={mapOpen} onToggle={e => { setMapOpen(e.target.open); setTimeout(() => { if (mapObjRef.current) mapObjRef.current.invalidateSize(); }, 60); }}>
