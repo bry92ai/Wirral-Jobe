@@ -604,6 +604,14 @@ export default function AdminPage() {
               <p style={{ fontSize: '0.85rem' }}>
                 {d.license_type} | {d.vehicle_type} | {d.zone || 'no zone'} | {d.vehicle_make_model_colour} | Reg …{d.reg_last_3} | Exp {d.expiry_date} | Badge {d.badge_number} | {d.phone} | Commission {d.commission_rate || 0}% | Future bracket: {d.letter || 'None'}
               </p>
+              <p style={{ fontSize: '0.8rem', color: 'var(--cream-dim)' }}>
+                Reliability {Math.round(d.reliability_score || 100)}% | Completed {d.jobs_completed || 0} | Cancelled {d.jobs_cancelled || 0} | No-show {d.jobs_no_show || 0} | Declined {d.jobs_declined || 0}
+              </p>
+              {(d.insurance_expiry || d.operator_licence_expiry) && (
+                <p style={{ fontSize: '0.8rem', color: d.insurance_expiry && new Date(d.insurance_expiry) < new Date() ? 'crimson' : 'var(--cream-dim)' }}>
+                  Insurance exp: {d.insurance_expiry || '—'} | Operator: {d.operator_name || '—'} ({d.operator_licence_number || '—'}) exp {d.operator_licence_expiry || '—'} {d.holds_own_operator_licence ? '· Own licence' : ''}
+                </p>
+              )}
               <p style={{ fontSize: '0.85rem' }}>
                 <strong>Owed settle: {formatCurrency(d.settle_balance)}</strong>
                 <input type="number" step="0.01" placeholder="Payment" style={{ width: 90, marginLeft: 10 }}

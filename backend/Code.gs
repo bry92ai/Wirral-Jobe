@@ -907,7 +907,9 @@ function sendDriverAllocatedSms(job, driver) {
 }
 
 function sendDriverArrivedSms(job) {
-  return false;
+  if (!job.customer_phone) return false;
+  const body = 'Your Wirral Jobe driver has arrived at the pickup. Booking ' + job.id + '.';
+  try { sendTwilioSms(job.customer_phone, body); return true; } catch (e) { Logger.log('Failed to send arrival SMS: %s', e.message); return false; }
 }
 
 function sendJourneyCompletedSms(job) {
@@ -1279,6 +1281,25 @@ function sendPushToCustomer(customerId, title, body, data) {
   const customer = getCustomers().find(c => c.id === customerId);
   if (!customer || !customer.fcm_token) return false;
   return sendPushNotification(customer.fcm_token, title, body, data);
+}
+
+function notifyCustomer(job, pushTitle, pushBody, pushData, smsKey, smsExtra) {
+  const customer = job.customer_id ? findCustomerById(job.customer_id) : getCustomers().find(c => normalizePhone(c.phone) === normalizePhone(job.customer_phone));
+  const pushSent = customer?.fcm_token ? sendPushNotification(customer.fcm_token, pushTitle, pushBody, pushData || {}) : false;
+  if (!pushSent && customer?.phone && customerSmsEnabled()) {
+    if (getSmsTemplate(smsKey)) {
+      try {
+        sendTemplatedSms(customer.phone, smsKey, customerSmsData(job, smsExtra || {}));
+        return { push: false, sms: true };
+      } catch (e) { Logger.log('SMS fallback failed for %s: %s', smsKey, e.message); }
+    } else if (smsExtra && smsExtra.sms_body) {
+      try {
+        sendTwilioSms(customer.phone, smsExtra.sms_body);
+        return { push: false, sms: true };
+      } catch (e) { Logger.log('SMS fallback failed: %s', e.message); }
+    }
+  }
+  return { push: pushSent, sms: false };
 }
 
 function sendPushToDriver(driverId, title, body, data) {
@@ -1761,15 +1782,8 @@ function updateDriverLocation(body, driverId) {
       if (!n.fiveMinNotified) {
         n.fiveMinNotified = true;
         updateJob(job.id, { notes: JSON.stringify(n), updated_at: now });
-        if (job.customer_id) {
-          sendPushToCustomer(job.customer_id, 'Almost There!', 'Your driver is about ' + Math.max(1, etaMins) + ' minutes away.', { route: '/track/' + job.tracking_token });
-        }
-        if (job.customer_phone) {
-          try {
-            const smsBody = 'Your Wirral Jobe driver is about ' + Math.max(1, etaMins) + ' minutes away!';
-            if (customerSmsEnabled()) sendTwilioSms(job.customer_phone, smsBody);
-          } catch (e) { Logger.log('5-min SMS error: %s', e.message); }
-        }
+        const etaText = Math.max(1, etaMins);
+        notifyCustomer(job, 'Almost There!', 'Your driver is about ' + etaText + ' minutes away.', { route: '/track/' + job.tracking_token }, 'customer-driver-5-minutes-away', { sms_body: 'Your Wirral Jobe driver is about ' + etaText + ' minutes away! Track: ' + buildTrackingLink(job.tracking_token) });
         Logger.log('5-min ETA notification sent for job %s (ETA: %s min)', job.id, etaMins);
       }
     }
