@@ -1639,9 +1639,18 @@ function getDriverMe(driverId) {
   if (!driverId) throw new Error('No driver ID');
   const d = findDriverById(driverId);
   if (!d) throw new Error('Driver not found');
+  const weekKey = getCurrentWeekKey();
+  const weekTotal = getJobs().filter(j => j.driver_id === driverId && j.status === 'COMPLETE' && j.settle_period_week === weekKey)
+    .reduce((sum, j) => sum + (Number(j.settle_fee_charged) || 0), 0);
+  const settleConfig = getSettleConfig();
+  const remainingCap = Math.max(0, settleConfig.cap - weekTotal);
   return {
     id: d.id, name: d.name, vehicleType: d.vehicle_type, status: d.status,
     settleBalance: Number(d.settle_balance) || 0, commissionRate: Number(d.commission_rate) || 0,
+    reliabilityScore: Number(d.reliability_score) || 100,
+    jobsCompleted: Number(d.jobs_completed) || 0, jobsCancelled: Number(d.jobs_cancelled) || 0,
+    jobsNoShow: Number(d.jobs_no_show) || 0, jobsDeclined: Number(d.jobs_declined) || 0,
+    weeklySettleTotal: weekTotal, weeklySettleCap: settleConfig.cap, remainingSettleCap: remainingCap,
     zone: driverZone(d), lastLat: Number(d.last_lat) || null, lastLng: Number(d.last_lng) || null,
     lastLocationAt: d.last_location_at || null, availableSince: d.available_since || null
   };

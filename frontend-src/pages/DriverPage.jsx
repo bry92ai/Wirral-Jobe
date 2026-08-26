@@ -45,7 +45,6 @@ const STATUS_LABELS = {
 const STATUS_ACTIONS = {
   ASSIGNED: { next: 'ON_WAY', label: 'On the way to pickup' },
   ON_WAY: { next: 'ARRIVED', label: 'Arrived at pickup' },
-  ARRIVED: { next: 'POB', label: 'Passenger on board' },
   POB: { next: 'COMPLETE', label: 'Complete journey' }
 };
 
@@ -102,6 +101,7 @@ function DriverPageContent() {
   const [mapReady, setMapReady] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [loading, setLoading] = useState(false);
+  const [pinInput, setPinInput] = useState('');
   const [currentZoneId, setCurrentZoneId] = useState(null);
   const [heading, setHeading] = useState(null);
   const [openPanel, setOpenPanel] = useState(null);
@@ -192,6 +192,14 @@ function DriverPageContent() {
       distance: Number(activeJob.meterDistance) || 0,
       waitingSeconds: Number(activeJob.meterWaitingSeconds) || 0
     };
+  }, [activeJob, now]);
+
+  const arrivalWait = useMemo(() => {
+    if (!activeJob || activeJob.status !== 'ARRIVED' || !activeJob.arrivedAt) return null;
+    const start = new Date(activeJob.arrivedAt).getTime();
+    const elapsedMs = Math.max(0, now - start);
+    const canNoShow = elapsedMs >= 3 * 60 * 1000;
+    return { elapsedMs, minutes: Math.floor(elapsedMs / 60000), seconds: Math.floor((elapsedMs % 60000) / 1000), canNoShow };
   }, [activeJob, now]);
 
   useEffect(() => {
@@ -497,6 +505,25 @@ function DriverPageContent() {
     }
     catch (err) { setError(err.message); }
     finally { setLoading(false); }
+  }
+
+  async function verifyPin(jobId, pin) {
+    setLoading(true);
+    try {
+      await api(`driver/jobs/${jobId}/verify-pin`, { pin }, driverAuth());
+      setPinInput('');
+      await loadJobs(); await loadProfile();
+      updateDriverService({ status: 'POB', jobId, fare: activeJob?.fare || 0 });
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  async function logContactAttempt(jobId, method) {
+    try {
+      await api(`driver/jobs/${jobId}/contact-attempt`, { method }, driverAuth());
+      setMessage(`Contact attempt (${method}) logged.`);
+      setTimeout(() => setMessage(''), 2000);
+    } catch (err) { setError(err.message); }
   }
 
   async function changeVehicle(jobId, vehicleType) {
@@ -939,7 +966,12 @@ function DriverPageContent() {
           <img src={logo} alt="" className="logo-badge" />
           <div className="name-block">
             <div className="name">{driverName || driverId}</div>
-            <div className="sub">{profile ? `${getZoneName(profile.zone)} · ${formatCurrency(profile.settleBalance)}` : driverId}</div>
+            <div className="sub">{profile ? `${getZoneName(profile.zone)} · Reliability ${Math.round(profile.reliabilityScore || 100)}%` : driverId}</div>
+            {profile && (
+              <div className="sub" style={{ fontSize: '0.7rem', color: 'var(--cream-dim)', marginTop: 2 }}>
+                Settle balance {formatCurrency(profile.settleBalance)} · Weekly cap {formatCurrency(profile.weeklySettleCap || 0)} (left {formatCurrency(profile.remainingSettleCap || 0)})
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -1221,7 +1253,26 @@ function DriverPageContent() {
             {activeJob.customerPhone && (
               <a href={`tel:${formatPhone(activeJob.customerPhone)}`} className="btn btn-outline btn-sm" style={{ display: 'block', textAlign: 'center', marginBottom: '0.75rem' }}>Call passenger</a>
             )}
-            {STATUS_ACTIONS[activeJob.status] && (
+            {activeJob.status === 'ARRIVED' && (
+              <div style={{ marginBottom: '0.75rem' }}>
+                {arrivalWait && (
+                  <div style={{ fontSize: '0.85rem', color: 'var(--cream-dim)', marginBottom: '0.5rem' }}>
+                    Waiting: <b>{arrivalWait.minutes}m {String(arrivalWait.seconds).padStart(2, '0')}s</b>
+                    {!arrivalWait.canNoShow && <span style={{ display: 'block', fontSize: '0.75rem' }}>No-show available in {3 - arrivalWait.minutes}m</span>}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginBottom: '0.5rem' }}>
+                  {['call', 'sms', 'whatsapp'].map(method => (
+                    <button key={method} onClick={() => logContactAttempt(activeJob.jobId, method)} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', textTransform: 'capitalize' }}>{method}</button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={pinInput} onChange={e => setPinInput(e.target.value)} placeholder="Passenger PIN" className="wj-details-input" style={{ flex: 1, textAlign: 'center' }} />
+                  <button onClick={() => verifyPin(activeJob.jobId, pinInput)} disabled={loading || pinInput.length !== 4} className="btn btn-primary">Verify PIN</button>
+                </div>
+              </div>
+            )}
+            {STATUS_ACTIONS[activeJob.status] && activeJob.status !== 'ARRIVED' && (
               <button onClick={() => setStatus(activeJob.jobId, STATUS_ACTIONS[activeJob.status].next)} disabled={loading} className="btn btn-primary">
                 {loading ? 'Updating…' : STATUS_ACTIONS[activeJob.status].label}
               </button>
@@ -1231,7 +1282,7 @@ function DriverPageContent() {
               <button onClick={() => changeVehicle(activeJob.jobId, 'mpv')} disabled={loading || activeJob.vehicleType === 'mpv'} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>MPV tariff</button>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: '0.5rem' }}>
-              <button onClick={() => setStatus(activeJob.jobId, 'NO_SHOW')} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>No show</button>
+              <button onClick={() => setStatus(activeJob.jobId, 'NO_SHOW')} disabled={loading || !(arrivalWait && arrivalWait.canNoShow)} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>Customer not here</button>
               <button onClick={() => setStatus(activeJob.jobId, 'CUSTOMER_CANCELLED')} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>Customer cancelled</button>
             </div>
           </div>
