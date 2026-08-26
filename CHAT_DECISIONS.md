@@ -2,7 +2,7 @@
 
 This file captures the consolidated decisions from the build discussions. It should be treated as the source of truth when documentation and old code disagree.
 
-Last updated: 2026-08-25
+Last updated: 2026-08-28
 
 ---
 

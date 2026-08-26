@@ -9,9 +9,24 @@ backend/              Google Apps Script backend (Code.gs, Zones.gs, etc.)
 netlify/              Netlify function that proxies API calls to Apps Script
 android/              Capacitor Android project
 _STORE_ASSETS/        Play Store icon and feature graphic
+_DELIVERABLES/        Built APK and AAB files
 PLAY_STORE_LISTING.txt   Store listing copy
 PLAY_STORE_CHECKLIST.txt Remaining launch steps
 ```
+
+## What changed in this handover
+
+- **Free bookings:** normal customer bookings no longer require a £1 card payment. Square is disabled by default and reserved for a future optional card-guarantee flow.
+- **Driver settle model:** drivers are charged £1 per completed job, capped at £10 per week. The per-job fee and weekly cap are configurable via `admin/settle-config`.
+- **Customer trust / restrictions:** customers build a factual history (completed, cancelled, late-cancellation, no-show counts). Bad behaviour escalates through `none` → `warning` → `card_guarantee` → `restricted` → `blocked`. Blocked customers cannot book; restricted bookings are logged for admin review.
+- **Driver reliability:** jobs completed, cancelled, no-show, abandoned and declined are counted; a `reliability_score` is maintained and visible to admin and driver.
+- **PIN verification:** a 4-digit journey PIN is generated for each booking. The driver must enter the passenger PIN before the job can move to `POB`.
+- **Arrival timer / geofenced no-show:** drivers must wait at least 3 minutes and remain within ~150 m of the pickup before marking a no-show. Evidence is recorded in the job notes.
+- **Contact logging:** drivers can log call/sms/whatsapp contact attempts against a job for no-show evidence and support.
+- **Admin email/password auth:** replaced the shared admin password with an `Admins` sheet, email login, 6-hour sessions, failed-attempt lockout, email/password change, and recovery endpoints.
+- **Operator licence tracking:** driver records store insurance expiry, operator name, operator licence number/expiry, and own-operator-licence status.
+- **Push-first / SMS-fallback:** customer notifications prefer FCM push; SMS is used as fallback when the customer has no FCM token.
+- **Booking for someone else:** customers can specify a separate passenger name and mobile number.
 
 ## Architecture
 
@@ -66,17 +81,17 @@ PLAY_STORE_CHECKLIST.txt Remaining launch steps
 ## Default logins
 
 - **Driver:** seeded in `backend/Code.gs` / Google Sheets (e.g. `DRV-001` / `1234`)
-- **Admin:** password set by the `ADMIN_PASSWORD` Apps Script property
+- **Admin:** email + password login using the `Admins` sheet. Legacy `ADMIN_PASSWORD_HASH` is auto-migrated on first admin login. Use the `admin/setup` endpoint (requires `ADMIN_SETUP_TOKEN` script property) to create the first admin account.
 
 ## Environment variables
 
 ### Frontend / build (`VITE_*`)
 
 - `VITE_API_URL` — backend URL for the frontend (e.g. `https://wirraljobe.com/`)
-- `VITE_GOOGLE_MAPS_API_KEY` — Google Maps JavaScript API (used by admin map)
-- `VITE_SQUARE_APPLICATION_ID` / `VITE_SQUARE_LOCATION_ID` — Square card payments
+- `VITE_GOOGLE_MAPS_API_KEY` — Google Maps JavaScript API (used by admin map; optional)
+- `VITE_SQUARE_APPLICATION_ID` / `VITE_SQUARE_LOCATION_ID` — Square card payments (optional; currently unused, reserved for future card-guarantee flow)
 
-If Stripe/Square keys are omitted, the app falls back to a no-card “Confirm booking” flow.
+Bookings are now free by default and do not require Square. Square may be re-enabled later for a card-guarantee flow for persistently unreliable customers.
 If the Google Maps key is omitted, the admin page still works but the map will not load.
 
 ### Google Apps Script properties
