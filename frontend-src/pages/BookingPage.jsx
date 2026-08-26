@@ -320,16 +320,25 @@ export default function BookingPage() {
 
   useEffect(() => {
     async function getPickupLocation() {
+      if (pickup.lat) return;
       try {
         const permission = await Geolocation.requestPermissions();
-        if (permission.location !== 'granted' && permission.coarseLocation !== 'granted') {
-          if (!pickup.lat) setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
+        if (permission.location === 'granted' || permission.coarseLocation === 'granted') {
+          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
+          setPickupFromLatLng(pos.coords.latitude, pos.coords.longitude);
           return;
         }
-        const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
-        setPickupFromLatLng(pos.coords.latitude, pos.coords.longitude);
       } catch (err) {
-        if (!pickup.lat) setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
+        // Capacitor geolocation not available (e.g. web browser), fall through to browser API.
+      }
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => setPickupFromLatLng(pos.coords.latitude, pos.coords.longitude),
+          () => setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
+      } else {
+        setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
       }
     }
     getPickupLocation();
