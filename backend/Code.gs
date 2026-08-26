@@ -43,7 +43,7 @@ const AIRPORTS = [
 ];
 
 const JOB_HEADERS = ['created_at','id','status','driver_id','customer_name','customer_phone','pickup_address','dropoff_address','pickup_lat','pickup_lng','dropoff_lat','dropoff_lng','pickup_time','vehicle_type','miles','fare','booking_fee','payment_id','payment_status','commission_rate','commission_amount','settle_fee_charged','settle_period_week','tracking_token','on_way_at','arrived_at','pob_at','completed_at','pin_verified_at','customer_id','passengers','notes','return_job_id','cancelled_at','updated_at'];
-const DRIVER_HEADERS = ['id','name','phone','pin','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','status','zone','last_lat','last_lng','last_location_at','commission_rate','settle_balance','available_since','created_at','updated_at','pin_hash','fcm_token','jobs_completed','jobs_cancelled','jobs_no_show','jobs_abandoned','jobs_declined','reliability_score'];
+const DRIVER_HEADERS = ['id','name','phone','pin','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','status','zone','last_lat','last_lng','last_location_at','commission_rate','settle_balance','available_since','created_at','updated_at','pin_hash','fcm_token','jobs_completed','jobs_cancelled','jobs_no_show','jobs_abandoned','jobs_declined','reliability_score','insurance_expiry','operator_name','operator_licence_number','operator_licence_expiry','holds_own_operator_licence'];
 const OFFER_HEADERS = ['jobId','currentDriverId','offeredDrivers','expiresAt','pickupLat','pickupLng'];
 const BID_HEADERS = ['created_at','job_id','driver_id','amount','status'];
 const CUSTOMER_HEADERS = ['id','name','phone','email','pin_hash','created_at','status','updated_at','last_login_at','fcm_token','completed_count','cancellation_count','late_cancellation_count','no_show_count','restriction_level','trust_flags'];
@@ -1343,7 +1343,10 @@ function getAllDrivers() {
     vehicle_make_model_colour: d.vehicle_make_model_colour, reg_last_3: d.reg_last_3,
     expiry_date: d.expiry_date, badge_number: d.badge_number, zone: d.zone, commission_rate: Number(d.commission_rate) || 0,
     settle_balance: Number(d.settle_balance) || 0, last_lat: Number(d.last_lat) || null, last_lng: Number(d.last_lng) || null,
-    status: d.status, letter: getDriverLetter(d.id) || ''
+    status: d.status, letter: getDriverLetter(d.id) || '',
+    insuranceExpiry: d.insurance_expiry || '', operatorName: d.operator_name || '',
+    operatorLicenceNumber: d.operator_licence_number || '', operatorLicenceExpiry: d.operator_licence_expiry || '',
+    holdsOwnOperatorLicence: d.holds_own_operator_licence || ''
   }));
 }
 function findDriverById(id) { return getDrivers().find(d => d.id === id); }
@@ -1568,7 +1571,8 @@ function approveDriverApplication(applicationId) {
     license_type: application.license_type, vehicle_make_model_colour: application.vehicle_make_model_colour, reg_last_3: application.reg_last_3,
     expiry_date: application.expiry_date, badge_number: application.badge_number, status: 'AVAILABLE', zone: '', last_lat: '', last_lng: '',
     last_location_at: '', commission_rate: 0, settle_balance: 0, available_since: now,
-    jobs_completed: 0, jobs_cancelled: 0, jobs_no_show: 0, jobs_abandoned: 0, jobs_declined: 0, reliability_score: 100
+    jobs_completed: 0, jobs_cancelled: 0, jobs_no_show: 0, jobs_abandoned: 0, jobs_declined: 0, reliability_score: 100,
+    insurance_expiry: '', operator_name: '', operator_licence_number: '', operator_licence_expiry: '', holds_own_operator_licence: ''
   };
   getDriversSheet().appendRow(DRIVER_HEADERS.map(header => driver[header] !== undefined ? driver[header] : ''));
   updateDriverApplication(application.id, { status: 'APPROVED', reviewed_at: now, reviewed_by: 'admin', driver_id: driverId });
@@ -2990,7 +2994,8 @@ function adminAssign(body) {
 }
 
 function createAdminDriver(body) {
-  const { id, name, phone, pin, vehicle_type, license_type, vehicle_make_model_colour, reg_last_3, expiry_date, badge_number, commission_rate, letter } = body || {};
+  const { id, name, phone, pin, vehicle_type, license_type, vehicle_make_model_colour, reg_last_3, expiry_date, badge_number, commission_rate, letter,
+    insurance_expiry, operator_name, operator_licence_number, operator_licence_expiry, holds_own_operator_licence } = body || {};
   if (!id || !name || !phone || !pin || !vehicle_type) throw new Error('Missing driver fields');
   const now = new Date().toISOString();
   const driver = {
@@ -2998,7 +3003,9 @@ function createAdminDriver(body) {
     vehicle_make_model_colour: vehicle_make_model_colour || '', reg_last_3: reg_last_3 || '', expiry_date: expiry_date || '', badge_number: badge_number || '',
     status: 'AVAILABLE', zone: '', last_lat: '', last_lng: '', last_location_at: '', commission_rate: Number(commission_rate) || 0,
     settle_balance: 0, available_since: now, created_at: now, updated_at: now,
-    jobs_completed: 0, jobs_cancelled: 0, jobs_no_show: 0, jobs_abandoned: 0, jobs_declined: 0, reliability_score: 100
+    jobs_completed: 0, jobs_cancelled: 0, jobs_no_show: 0, jobs_abandoned: 0, jobs_declined: 0, reliability_score: 100,
+    insurance_expiry: insurance_expiry || '', operator_name: operator_name || '', operator_licence_number: operator_licence_number || '',
+    operator_licence_expiry: operator_licence_expiry || '', holds_own_operator_licence: holds_own_operator_licence || ''
   };
   getDriversSheet().appendRow(DRIVER_HEADERS.map(header => driver[header] !== undefined ? driver[header] : ''));
   SpreadsheetApp.flush();
@@ -3009,7 +3016,8 @@ function createAdminDriver(body) {
 function updateAdminDriver(id, body) {
   const d = findDriverById(id);
   if (!d) throw new Error('Driver not found');
-  const { name, phone, vehicle_type, license_type, vehicle_make_model_colour, reg_last_3, expiry_date, badge_number, commission_rate, letter } = body || {};
+  const { name, phone, vehicle_type, license_type, vehicle_make_model_colour, reg_last_3, expiry_date, badge_number, commission_rate, letter,
+    insurance_expiry, operator_name, operator_licence_number, operator_licence_expiry, holds_own_operator_licence } = body || {};
   updateDriver(id, {
     name: name !== undefined ? name : d.name,
     phone: phone !== undefined ? phone : d.phone,
@@ -3019,7 +3027,12 @@ function updateAdminDriver(id, body) {
     reg_last_3: reg_last_3 !== undefined ? reg_last_3 : d.reg_last_3,
     expiry_date: expiry_date !== undefined ? expiry_date : d.expiry_date,
     badge_number: badge_number !== undefined ? badge_number : d.badge_number,
-    commission_rate: commission_rate !== undefined ? Number(commission_rate) || 0 : Number(d.commission_rate) || 0
+    commission_rate: commission_rate !== undefined ? Number(commission_rate) || 0 : Number(d.commission_rate) || 0,
+    insurance_expiry: insurance_expiry !== undefined ? insurance_expiry : d.insurance_expiry,
+    operator_name: operator_name !== undefined ? operator_name : d.operator_name,
+    operator_licence_number: operator_licence_number !== undefined ? operator_licence_number : d.operator_licence_number,
+    operator_licence_expiry: operator_licence_expiry !== undefined ? operator_licence_expiry : d.operator_licence_expiry,
+    holds_own_operator_licence: holds_own_operator_licence !== undefined ? holds_own_operator_licence : d.holds_own_operator_licence
   });
   if (letter !== undefined) setDriverLetter(id, letter);
   return { ok: true, driverId: id };
