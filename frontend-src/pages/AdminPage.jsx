@@ -728,8 +728,12 @@ export default function AdminPage() {
             <p>Status: <span className={`badge status-${jobDetail.status}`}>{jobDetail.status}</span></p>
             <p>{jobDetail.pickupAddress} → {jobDetail.dropoffAddress}</p>
             <p>Customer: {jobDetail.customerName} · {jobDetail.customerPhone}</p>
+            {jobDetail.passengerName && <p>Passenger: {jobDetail.passengerName} · {jobDetail.passengerPhone}</p>}
             <p>Fare: {formatCurrency(jobDetail.fare)} · Vehicle: {jobDetail.vehicleType}</p>
             <p>Pickup time: {safeLocaleString(jobDetail.pickupTime)}</p>
+            {jobDetail.customerRestrictionLevel && jobDetail.customerRestrictionLevel !== 'none' && (
+              <p style={{ color: 'crimson' }}>Customer trust level: {jobDetail.customerRestrictionLevel.replace('_', ' ')} · Flags: {jobDetail.customerTrustFlags?.join(', ') || 'none'}</p>
+            )}
             <h4>Timeline</h4>
             <ul>
               <li>Created: {safeLocaleString(jobDetail.createdAt)}</li>

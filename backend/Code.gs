@@ -346,6 +346,7 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'admin/pending-sms') return requireAdmin(adminToken, () => ({ messages: getAdminPendingSms() }));
   if (r === 'admin/sms-config') return requireAdmin(adminToken, () => body ? updateSmsConfig(body) : { disabled: getSmsDisabledKeys() });
   if (r === 'admin/jobs') return requireAdmin(adminToken, () => ({ jobs: getAllJobs() }));
+  if (r === 'admin/customers') return requireAdmin(adminToken, () => ({ customers: getCustomers().map(customerResponse) }));
   if (r === 'admin/drivers') return requireAdmin(adminToken, () => (body && body.id && body.name ? createAdminDriver(body) : { drivers: getAllDrivers() }));
   if (r === 'admin/process-future-bookings') return requireAdmin(adminToken, () => { processFutureBookings(); return { ok: true }; });
   if (r === 'admin/future-offers') return requireAdmin(adminToken, () => ({ futureOffers: getAllFutureOffers() }));
@@ -686,7 +687,19 @@ function sendTwilioSms(to, body) {
   });
   if (response.getResponseCode() >= 300) throw new Error('Unable to send SMS');
 }
-function customerResponse(customer) { return { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email || '', completedCount: Number(customer.completed_count) || 0, noShowCount: Number(customer.no_show_count) || 0, restrictionLevel: customer.restriction_level || '' }; }
+function customerResponse(customer) {
+  let trustFlags = [];
+  try { trustFlags = JSON.parse(customer.trust_flags || '[]'); } catch (e) {}
+  return {
+    id: customer.id, name: customer.name, phone: customer.phone, email: customer.email || '',
+    completedCount: Number(customer.completed_count) || 0,
+    cancellationCount: Number(customer.cancellation_count) || 0,
+    lateCancellationCount: Number(customer.late_cancellation_count) || 0,
+    noShowCount: Number(customer.no_show_count) || 0,
+    restrictionLevel: customer.restriction_level || 'none',
+    trustFlags: trustFlags
+  };
+}
 function customerSmsEnabled() { return PropertiesService.getScriptProperties().getProperty('SMS_ENABLED') === 'true'; }
 
 function getSmsTemplate(key) { return SMS_TEMPLATES.find(t => t.key === key); }
@@ -1786,6 +1799,9 @@ function findJobById(id) { return getJobs().find(j => j.id === id); }
 
 function jobResponse(job) {
   const d = job.driver_id ? findDriverById(job.driver_id) : null;
+  const customer = job.customer_id ? findCustomerById(job.customer_id) : getCustomers().find(c => normalizePhone(c.phone) === normalizePhone(job.customer_phone));
+  let customerTrustFlags = [];
+  try { customerTrustFlags = JSON.parse(customer?.trust_flags || '[]'); } catch {}
   let notes = {};
   try { notes = JSON.parse(job.notes || '{}'); } catch {}
   const meterDistance = Number(notes.meterDistance) || Number(job.miles) || 0;
@@ -1812,7 +1828,11 @@ function jobResponse(job) {
     pobAt: job.pob_at, completedAt: job.completed_at, pinVerifiedAt: job.pin_verified_at || null,
     pobWaitingRate: Number(notes.pobWaitingRate) || getWaitingRate(job.vehicle_type || 'car', pobAt),
     pobMeterStartedAt: notes.pobMeterStartedAt || null,
-    meterDistance, meterWaitingSeconds, meterFare
+    meterDistance, meterWaitingSeconds, meterFare,
+    customerRestrictionLevel: customer?.restriction_level || 'none',
+    customerTrustFlags: customerTrustFlags,
+    passengerName: notes.passengerName || '',
+    passengerPhone: notes.passengerPhone || ''
   };
 }
 
@@ -1946,6 +1966,11 @@ function createBooking(body) {
   const p = body || {};
   if (!p.customerToken) throw new Error('Please log in to make a booking');
   const customer = requireCustomer(p.customerToken);
+  if (customer.restriction_level === 'blocked') throw new Error('Your account cannot place bookings at this time. Please contact support.');
+  if (customer.restriction_level === 'restricted') {
+    // Still allowed, but flag the booking for admin review.
+    Logger.log('Booking %s for restricted customer %s', '', customer.id);
+  }
   const customerName = customer.name;
   const customerPhone = customer.phone;
   if (!p.pickupAddress || !p.dropoffAddress || !customerName || !customerPhone) throw new Error('Missing required fields');

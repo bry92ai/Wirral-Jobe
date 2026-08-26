@@ -319,9 +319,16 @@ export default function CustomerPage() {
   const pastJobs = jobs.filter(job => new Date(job.pickupTime).getTime() < now || ['COMPLETE', 'CANCELLED'].includes(job.status));
   const shownJobs = tab === 'future' ? futureJobs : pastJobs;
 
+  const trustMessage = customer.restrictionLevel && customer.restrictionLevel !== 'none'
+    ? `Account status: ${customer.restrictionLevel.replace('_', ' ')}. Contact support if you believe this is incorrect.`
+    : customer.trustFlags?.includes('late_cancellation_pattern') || customer.trustFlags?.includes('no_show_pattern')
+      ? 'Your recent booking history shows missed or late cancellations. Continued issues may restrict future bookings.'
+      : null;
+
   return <div className="wj-shell"><div className="wj-frame wj-customer-dashboard">
     <header className="wj-customer-header"><img src={logo} alt="The Wirral Jobe" /><div><span>Customer portal</span><strong>{customer.name}</strong></div><button className="wj-header-logout" onClick={logout}>Log out</button></header>
     <Link to="/" className="wj-customer-book">Book a ride <b>›</b></Link>
+    {trustMessage && <p className="error" style={{ margin: '0.5rem 0', fontSize: '0.85rem' }}>{trustMessage}</p>}
     {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
     <section className="wj-customer-section"><h2>Your bookings</h2><div className="wj-customer-tabs"><button className={tab === 'future' ? 'active' : ''} onClick={() => setTab('future')}>Future ({futureJobs.length})</button><button className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>Past ({pastJobs.length})</button></div>
       {shownJobs.length === 0 ? <p className="wj-customer-empty">No {tab} bookings yet.</p> : shownJobs.map(job => {
