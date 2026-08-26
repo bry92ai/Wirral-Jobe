@@ -330,6 +330,8 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (parts[0] === 'driver' && parts[1] === 'future-offers' && parts[3] === 'accept') return acceptFutureOffer(parts[2], requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'future-offers' && parts[3] === 'decline') return declineFutureOffer(parts[2], requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'jobs' && parts[3] === 'status') return setJobStatus(parts[2], body, requireDriver(driverId, driverToken).id);
+  if (parts[0] === 'driver' && parts[1] === 'jobs' && parts[3] === 'verify-pin') return verifyJobPin(parts[2], body, requireDriver(driverId, driverToken).id);
+  if (parts[0] === 'driver' && parts[1] === 'jobs' && parts[3] === 'contact-attempt') return logDriverContactAttempt(parts[2], body, requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'jobs' && parts[3] === 'vehicle') return changeJobVehicle(parts[2], body, requireDriver(driverId, driverToken).id);
   if (r === 'driver/location') return updateDriverLocation(body, requireDriver(driverId, driverToken).id);
   if (r === 'driver/secure-action') return handleSecureDriverAction(body);
@@ -872,6 +874,12 @@ function sendBookingConfirmedSms(job) {
   return sendCustomerSms(job, key);
 }
 
+function sendPassengerOnBoardSms(job) {
+  if (!job.customer_phone) return false;
+  const body = 'Your Wirral Jobe journey is now in progress. PIN verified. Track your ride at ' + buildTrackingLink(job.tracking_token) + '.';
+  try { sendTwilioSms(job.customer_phone, body); return true; } catch (e) { Logger.log('Failed to send POB SMS: %s', e.message); return false; }
+}
+
 function sendDriverAllocatedSms(job, driver) {
   if (!driver) return false;
   const key = customerJobTypeKey('driver-allocated-on-the-way', job);
@@ -1269,7 +1277,13 @@ function sendPushToDriver(driverId, title, body, data) {
 function getCustomerMe(token) { return { customer: customerResponse(requireCustomer(token)) }; }
 function getCustomerJobs(token) {
   const customer = requireCustomer(token);
-  return { jobs: getJobs().filter(job => job.customer_id === customer.id || (!job.customer_id && normalizePhone(job.customer_phone) === customer.phone)).map(jobResponse).sort((a, b) => new Date(b.pickupTime) - new Date(a.pickupTime)) };
+  const jobs = getJobs().filter(job => job.customer_id === customer.id || (!job.customer_id && normalizePhone(job.customer_phone) === customer.phone));
+  return { jobs: jobs.map(job => {
+    const resp = jobResponse(job);
+    const notes = getJobNotes(job);
+    resp.journeyPin = notes.journeyPin || null;
+    return resp;
+  }).sort((a, b) => new Date(b.pickupTime) - new Date(a.pickupTime)) };
 }
 function customerCancelJob(token, jobId, reason) {
   const customer = requireCustomer(token);
@@ -1873,6 +1887,22 @@ function movePendingToJob(id, updates) {
   return findJobById(id);
 }
 
+function generateJourneyPin() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+function setJobPin(jobId) {
+  const job = findJobById(jobId);
+  if (!job) return null;
+  let notes = {};
+  try { notes = JSON.parse(job.notes || '{}'); } catch (e) {}
+  if (!notes.journeyPin) {
+    notes.journeyPin = generateJourneyPin();
+    updateJob(jobId, { notes: JSON.stringify(notes) });
+  }
+  return notes.journeyPin;
+}
+
 // ---------- Booking ----------
 
 function allocateImmediateJob(jobId) {
@@ -1992,9 +2022,10 @@ function confirmBooking(body) {
     updated_at: now
   });
   if (!job) throw new Error('Could not create booking. Please try again.');
+  const journeyPin = setJobPin(pendingBookingId);
 
   writeAudit('customer', job.customer_id || job.customer_phone, 'booking_confirmed', 'job', pendingBookingId, { freeBooking: true });
-  sendBookingConfirmedSms(job);
+  sendBookingConfirmedSms(job, journeyPin);
 
   if (isFutureBooking || isAirport) {
     Logger.log('confirmBooking: starting future offer cycle for job %s', pendingBookingId);
@@ -2055,13 +2086,16 @@ function confirmReturnPair(body) {
   const returnJob = movePendingToJob(returnPendingBookingId, { status: 'SCHEDULED', payment_id: '', payment_status: 'FREE', updated_at: now });
   if (!outboundJob || !returnJob) throw new Error('Could not confirm both journeys. Please try again.');
 
+  const outboundPin = setJobPin(outboundJob.id);
+  const returnPin = setJobPin(returnJob.id);
+
   // Link the two legs so two-way-specific SMS templates and driver offers are used.
   updateJob(outboundJob.id, { return_job_id: returnJob.id, updated_at: now });
   updateJob(returnJob.id, { return_job_id: outboundJob.id, updated_at: now });
 
   writeAudit('customer', outboundJob.customer_id || outboundJob.customer_phone, 'booking_confirmed', 'job', outboundPendingBookingId + ',' + returnPendingBookingId, { freeBooking: true });
-  sendBookingConfirmedSms(findJobById(outboundJob.id));
-  sendBookingConfirmedSms(findJobById(returnJob.id));
+  sendBookingConfirmedSms(findJobById(outboundJob.id), outboundPin);
+  sendBookingConfirmedSms(findJobById(returnJob.id), returnPin);
 
   createFutureOffer(outboundPendingBookingId, Number(outboundJob.pickup_lat), Number(outboundJob.pickup_lng));
   createFutureOffer(returnPendingBookingId, Number(returnJob.pickup_lat), Number(returnJob.pickup_lng));
@@ -2070,6 +2104,60 @@ function confirmReturnPair(body) {
 }
 
 // ---------- Status ----------
+
+function getJobNotes(job) {
+  try { return JSON.parse(job.notes || '{}'); } catch (e) { return {}; }
+}
+
+function setJobNotes(jobId, notesMutator) {
+  const job = findJobById(jobId);
+  if (!job) throw new Error('Job not found');
+  const notes = getJobNotes(job);
+  notesMutator(notes);
+  updateJob(jobId, { notes: JSON.stringify(notes) });
+  return notes;
+}
+
+function verifyJobPin(jobId, body, driverId) {
+  if (!driverId) throw new Error('No driver ID');
+  const { pin } = body || {};
+  if (!pin) throw new Error('Please enter the passenger PIN');
+  const job = findJobById(jobId);
+  if (!job) throw new Error('Job not found');
+  if (job.driver_id !== driverId) throw new Error('Not assigned to you');
+  if (job.status !== 'ARRIVED' && job.status !== 'ON_WAY') throw new Error('You must be at the pickup to verify the PIN');
+  const notes = getJobNotes(job);
+  const expected = String(notes.journeyPin || '');
+  if (!expected) throw new Error('No PIN has been issued for this booking');
+  if (String(pin).trim() !== expected) {
+    writeAudit('driver', driverId, 'pin_verification_failed', 'job', jobId, {});
+    throw new Error('Incorrect PIN. Please ask the passenger for the code shown in their app.');
+  }
+  const now = new Date().toISOString();
+  updateJob(jobId, { status: 'POB', pob_at: now, pin_verified_at: now });
+  updateDriver(driverId, { status: 'BUSY' });
+  writeAudit('driver', driverId, 'pin_verified', 'job', jobId, {});
+  const pobJob = findJobById(jobId);
+  sendPassengerOnBoardSms(pobJob);
+  return { ok: true, status: 'POB' };
+}
+
+function logDriverContactAttempt(jobId, body, driverId) {
+  if (!driverId) throw new Error('No driver ID');
+  const { method } = body || {};
+  const validMethods = ['call', 'sms', 'whatsapp'];
+  if (!method || !validMethods.includes(method)) throw new Error('Contact method must be call, sms or whatsapp');
+  const job = findJobById(jobId);
+  if (!job) throw new Error('Job not found');
+  if (job.driver_id !== driverId) throw new Error('Not assigned to you');
+  const now = new Date().toISOString();
+  setJobNotes(jobId, notes => {
+    notes.contactAttempts = notes.contactAttempts || [];
+    notes.contactAttempts.push({ method, at: now });
+  });
+  writeAudit('driver', driverId, 'contact_attempt', 'job', jobId, { method });
+  return { ok: true, method, at: now };
+}
 
 function setJobStatus(jobId, body, driverId) {
   if (!driverId) throw new Error('No driver ID');
@@ -2081,6 +2169,32 @@ function setJobStatus(jobId, body, driverId) {
   if (cancelStatuses.includes(status)) {
     if (!['ASSIGNED', 'ON_WAY', 'ARRIVED', 'POB'].includes(job.status)) throw new Error('Job cannot be cancelled at this stage');
     const now = new Date().toISOString();
+
+    if (status === 'NO_SHOW') {
+      if (job.status !== 'ARRIVED') throw new Error('You must arrive at the pickup before marking a no-show');
+      const notes = getJobNotes(job);
+      const arrivalAt = notes.arrivalAt ? new Date(notes.arrivalAt).getTime() : new Date(job.arrived_at || now).getTime();
+      const minutesWaiting = Math.max(0, (Date.now() - arrivalAt) / 60000);
+      if (minutesWaiting < 3) throw new Error('Please wait at least 3 minutes before marking a no-show');
+      const driver = findDriverById(driverId) || {};
+      const arrivalLat = Number(notes.arrivalLat) || Number(driver.last_lat) || 0;
+      const arrivalLng = Number(notes.arrivalLng) || Number(driver.last_lng) || 0;
+      const pickupLat = Number(job.pickup_lat) || 0;
+      const pickupLng = Number(job.pickup_lng) || 0;
+      if (distanceMiles(arrivalLat, arrivalLng, pickupLat, pickupLng) > 0.15) {
+        throw new Error('You must be close to the pickup location to mark a no-show');
+      }
+      const evidence = {
+        noShowAt: now,
+        arrivalAt: notes.arrivalAt || job.arrived_at,
+        arrivalLat, arrivalLng,
+        minutesWaiting: Math.round(minutesWaiting),
+        contactAttempts: notes.contactAttempts || []
+      };
+      setJobNotes(jobId, n => { n.noShowEvidence = evidence; });
+      writeAudit('driver', driverId, 'no_show_evidence', 'job', jobId, evidence);
+    }
+
     updateJob(jobId, { status, cancelled_at: now });
     updateDriver(driverId, { status: 'AVAILABLE', available_since: now });
     writeAudit('driver', driverId, 'job_status_changed', 'job', jobId, { from: job.status, to: status });
@@ -2095,7 +2209,8 @@ function setJobStatus(jobId, body, driverId) {
     }
     return { ok: true, status };
   }
-  const nextStatus = { ASSIGNED: 'ON_WAY', ON_WAY: 'ARRIVED', ARRIVED: 'POB', POB: 'COMPLETE' };
+  const nextStatus = { ASSIGNED: 'ON_WAY', ON_WAY: 'ARRIVED', POB: 'COMPLETE' };
+  if (status === 'POB') throw new Error('Use PIN verification to mark passenger on board');
   if (nextStatus[job.status] !== status) throw new Error('Job status must progress in order');
   const now = new Date().toISOString();
   const updates = { status };
@@ -2126,6 +2241,12 @@ function setJobStatus(jobId, body, driverId) {
     if (updatedJob.customer_id) sendPushToCustomer(updatedJob.customer_id, 'Driver On The Way', 'Your driver is heading to you now.', { route: '/track/' + updatedJob.tracking_token });
   }
   if (status === 'ARRIVED') {
+    const driver = findDriverById(driverId) || {};
+    setJobNotes(jobId, notes => {
+      notes.arrivalAt = now;
+      notes.arrivalLat = Number(driver.last_lat) || Number(job.pickup_lat) || 0;
+      notes.arrivalLng = Number(driver.last_lng) || Number(job.pickup_lng) || 0;
+    });
     const updatedJob = findJobById(jobId);
     sendDriverArrivedSms(updatedJob);
     if (updatedJob.customer_id) sendPushToCustomer(updatedJob.customer_id, 'Driver Arrived', 'Your driver has arrived at the pickup.', { route: '/track/' + updatedJob.tracking_token });
