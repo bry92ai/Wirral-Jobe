@@ -105,6 +105,7 @@ function DriverPageContent() {
   const [currentZoneId, setCurrentZoneId] = useState(null);
   const [heading, setHeading] = useState(null);
   const [openPanel, setOpenPanel] = useState(null);
+  const [jobCardExpanded, setJobCardExpanded] = useState(true);
   const [bidBoard, setBidBoard] = useState([]);
   const [selectedBid, setSelectedBid] = useState(null);
   const [navigationTarget, setNavigationTarget] = useState(null);
@@ -1222,69 +1223,76 @@ function DriverPageContent() {
           <div className="card" style={{ padding: '1rem', borderRadius: 18, border: '2px solid var(--gold)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
               <span className={`badge status-${activeJob.status}`}>{STATUS_LABELS[activeJob.status] || activeJob.status}</span>
-              <span style={{ fontWeight: 800, fontSize: '1.2rem' }}>{formatCurrency(activeJob.fare)}</span>
-            </div>
-            {liveMeter && (
-              <div style={{ marginBottom: '0.75rem', padding: '0.75rem', border: '1.5px solid var(--gold)', borderRadius: 12, background: 'rgba(244,191,27,0.08)' }}>
-                <div style={{ fontSize: '0.65rem', color: 'var(--gold)', fontWeight: 800, textTransform: 'uppercase' }}>Meter running</div>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.7rem', color: 'var(--cream)', lineHeight: 1 }}>{formatCurrency(liveMeter.fare)}</div>
-                <div style={{ display: 'flex', gap: 12, fontSize: '0.75rem', color: 'var(--cream-dim)', marginTop: '0.25rem' }}>
-                  <span>{Math.floor(liveMeter.elapsedMs / 60000)}m {String(Math.floor((liveMeter.elapsedMs % 60000) / 1000)).padStart(2, '0')}s</span>
-                  <span>{liveMeter.distance.toFixed(1)} mi</span>
-                  {liveMeter.waitingSeconds > 0 && <span>{Math.ceil(liveMeter.waitingSeconds / 60)}m wait</span>}
-                </div>
-              </div>
-            )}
-            <div style={{ marginBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: '0.35rem' }}>
-                <span className="wj-dot wj-dot-green" style={{ marginTop: 4 }} />
-                <div style={{ fontSize: '0.85rem' }}><span style={{ color: 'var(--gold)', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>Pickup</span><br />{activeJob.pickupAddress}</div>
-              </div>
-              <div style={{ width: 2, height: 14, background: 'var(--border)', marginLeft: 3 }} />
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: '0.25rem' }}>
-                <span className="wj-dot wj-dot-red" style={{ marginTop: 4 }} />
-                <div style={{ fontSize: '0.85rem' }}><span style={{ color: 'var(--gold)', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>Drop-off</span><br />{activeJob.dropoffAddress}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontWeight: 800, fontSize: '1.2rem' }}>{formatCurrency(activeJob.fare)}</span>
+                <button type="button" onClick={() => setJobCardExpanded(v => !v)} className="btn btn-outline btn-sm" style={{ padding: '0.25rem 0.6rem' }}>{jobCardExpanded ? 'Hide' : 'Show'}</button>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: '0.75rem' }}>
-              <button type="button" onClick={() => setNavigationTarget({ label: 'pickup', address: activeJob.pickupAddress, lat: activeJob.pickupLat, lng: activeJob.pickupLng })} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Nav to pickup</button>
-              <button type="button" onClick={() => setNavigationTarget({ label: 'drop off', address: activeJob.dropoffAddress, lat: activeJob.dropoffLat, lng: activeJob.dropoffLng })} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Nav to drop off</button>
-            </div>
-            {activeJob.customerPhone && (
-              <a href={`tel:${formatPhone(activeJob.customerPhone)}`} className="btn btn-outline btn-sm" style={{ display: 'block', textAlign: 'center', marginBottom: '0.75rem' }}>Call passenger</a>
-            )}
-            {activeJob.status === 'ARRIVED' && (
-              <div style={{ marginBottom: '0.75rem' }}>
-                {arrivalWait && (
-                  <div style={{ fontSize: '0.85rem', color: 'var(--cream-dim)', marginBottom: '0.5rem' }}>
-                    Waiting: <b>{arrivalWait.minutes}m {String(arrivalWait.seconds).padStart(2, '0')}s</b>
-                    {!arrivalWait.canNoShow && <span style={{ display: 'block', fontSize: '0.75rem' }}>No-show available in {3 - arrivalWait.minutes}m</span>}
+            {jobCardExpanded && (
+              <>
+                {liveMeter && (
+                  <div style={{ marginBottom: '0.75rem', padding: '0.75rem', border: '1.5px solid var(--gold)', borderRadius: 12, background: 'rgba(244,191,27,0.08)' }}>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--gold)', fontWeight: 800, textTransform: 'uppercase' }}>Meter running</div>
+                    <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.7rem', color: 'var(--cream)', lineHeight: 1 }}>{formatCurrency(liveMeter.fare)}</div>
+                    <div style={{ display: 'flex', gap: 12, fontSize: '0.75rem', color: 'var(--cream-dim)', marginTop: '0.25rem' }}>
+                      <span>{Math.floor(liveMeter.elapsedMs / 60000)}m {String(Math.floor((liveMeter.elapsedMs % 60000) / 1000)).padStart(2, '0')}s</span>
+                      <span>{liveMeter.distance.toFixed(1)} mi</span>
+                      {liveMeter.waitingSeconds > 0 && <span>{Math.ceil(liveMeter.waitingSeconds / 60)}m wait</span>}
+                    </div>
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: 8, marginBottom: '0.5rem' }}>
-                  {['call', 'sms', 'whatsapp'].map(method => (
-                    <button key={method} onClick={() => logContactAttempt(activeJob.jobId, method)} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', textTransform: 'capitalize' }}>{method}</button>
-                  ))}
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: '0.35rem' }}>
+                    <span className="wj-dot wj-dot-green" style={{ marginTop: 4 }} />
+                    <div style={{ fontSize: '0.85rem' }}><span style={{ color: 'var(--gold)', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>Pickup</span><br />{activeJob.pickupAddress}</div>
+                  </div>
+                  <div style={{ width: 2, height: 14, background: 'var(--border)', marginLeft: 3 }} />
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: '0.25rem' }}>
+                    <span className="wj-dot wj-dot-red" style={{ marginTop: 4 }} />
+                    <div style={{ fontSize: '0.85rem' }}><span style={{ color: 'var(--gold)', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>Drop-off</span><br />{activeJob.dropoffAddress}</div>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={pinInput} onChange={e => setPinInput(e.target.value)} placeholder="Passenger PIN" className="wj-details-input" style={{ flex: 1, textAlign: 'center' }} />
-                  <button onClick={() => verifyPin(activeJob.jobId, pinInput)} disabled={loading || pinInput.length !== 4} className="btn btn-primary">Verify PIN</button>
+                <div style={{ display: 'flex', gap: 8, marginBottom: '0.75rem' }}>
+                  <button type="button" onClick={() => setNavigationTarget({ label: 'pickup', address: activeJob.pickupAddress, lat: activeJob.pickupLat, lng: activeJob.pickupLng })} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Nav to pickup</button>
+                  <button type="button" onClick={() => setNavigationTarget({ label: 'drop off', address: activeJob.dropoffAddress, lat: activeJob.dropoffLat, lng: activeJob.dropoffLng })} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Nav to drop off</button>
                 </div>
-              </div>
+                {activeJob.customerPhone && (
+                  <a href={`tel:${formatPhone(activeJob.customerPhone)}`} className="btn btn-outline btn-sm" style={{ display: 'block', textAlign: 'center', marginBottom: '0.75rem' }}>Call passenger</a>
+                )}
+                {activeJob.status === 'ARRIVED' && (
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    {arrivalWait && (
+                      <div style={{ fontSize: '0.85rem', color: 'var(--cream-dim)', marginBottom: '0.5rem' }}>
+                        Waiting: <b>{arrivalWait.minutes}m {String(arrivalWait.seconds).padStart(2, '0')}s</b>
+                        {!arrivalWait.canNoShow && <span style={{ display: 'block', fontSize: '0.75rem' }}>No-show available in {3 - arrivalWait.minutes}m</span>}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, marginBottom: '0.5rem' }}>
+                      {['call', 'sms', 'whatsapp'].map(method => (
+                        <button key={method} onClick={() => logContactAttempt(activeJob.jobId, method)} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', textTransform: 'capitalize' }}>{method}</button>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={pinInput} onChange={e => setPinInput(e.target.value)} placeholder="Passenger PIN" className="wj-details-input" style={{ flex: 1, textAlign: 'center' }} />
+                      <button onClick={() => verifyPin(activeJob.jobId, pinInput)} disabled={loading || pinInput.length !== 4} className="btn btn-primary">Verify PIN</button>
+                    </div>
+                  </div>
+                )}
+                {STATUS_ACTIONS[activeJob.status] && activeJob.status !== 'ARRIVED' && (
+                  <button onClick={() => setStatus(activeJob.jobId, STATUS_ACTIONS[activeJob.status].next)} disabled={loading} className="btn btn-primary">
+                    {loading ? 'Updating…' : STATUS_ACTIONS[activeJob.status].label}
+                  </button>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: '0.75rem' }}>
+                  <button onClick={() => changeVehicle(activeJob.jobId, 'car')} disabled={loading || activeJob.vehicleType === 'car'} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Car tariff</button>
+                  <button onClick={() => changeVehicle(activeJob.jobId, 'mpv')} disabled={loading || activeJob.vehicleType === 'mpv'} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>MPV tariff</button>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: '0.5rem' }}>
+                  <button onClick={() => setStatus(activeJob.jobId, 'NO_SHOW')} disabled={loading || !(arrivalWait && arrivalWait.canNoShow)} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>Customer not here</button>
+                  <button onClick={() => setStatus(activeJob.jobId, 'CUSTOMER_CANCELLED')} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>Customer cancelled</button>
+                </div>
+              </>
             )}
-            {STATUS_ACTIONS[activeJob.status] && activeJob.status !== 'ARRIVED' && (
-              <button onClick={() => setStatus(activeJob.jobId, STATUS_ACTIONS[activeJob.status].next)} disabled={loading} className="btn btn-primary">
-                {loading ? 'Updating…' : STATUS_ACTIONS[activeJob.status].label}
-              </button>
-            )}
-            <div style={{ display: 'flex', gap: 8, marginTop: '0.75rem' }}>
-              <button onClick={() => changeVehicle(activeJob.jobId, 'car')} disabled={loading || activeJob.vehicleType === 'car'} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Car tariff</button>
-              <button onClick={() => changeVehicle(activeJob.jobId, 'mpv')} disabled={loading || activeJob.vehicleType === 'mpv'} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>MPV tariff</button>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: '0.5rem' }}>
-              <button onClick={() => setStatus(activeJob.jobId, 'NO_SHOW')} disabled={loading || !(arrivalWait && arrivalWait.canNoShow)} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>Customer not here</button>
-              <button onClick={() => setStatus(activeJob.jobId, 'CUSTOMER_CANCELLED')} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>Customer cancelled</button>
-            </div>
           </div>
         </div>
       )}
