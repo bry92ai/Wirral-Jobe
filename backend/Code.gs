@@ -42,13 +42,14 @@ const AIRPORTS = [
   { name: 'Manchester', lat: 53.3537, lng: -2.2740, carFare: 75, mpvFare: 90 }
 ];
 
-const JOB_HEADERS = ['created_at','id','status','driver_id','customer_name','customer_phone','pickup_address','dropoff_address','pickup_lat','pickup_lng','dropoff_lat','dropoff_lng','pickup_time','vehicle_type','miles','fare','booking_fee','payment_id','payment_status','commission_rate','commission_amount','tracking_token','on_way_at','arrived_at','pob_at','completed_at','customer_id','passengers','notes','return_job_id','cancelled_at','updated_at'];
-const DRIVER_HEADERS = ['id','name','phone','pin','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','status','zone','last_lat','last_lng','last_location_at','commission_rate','settle_balance','available_since','created_at','updated_at','pin_hash','fcm_token'];
+const JOB_HEADERS = ['created_at','id','status','driver_id','customer_name','customer_phone','pickup_address','dropoff_address','pickup_lat','pickup_lng','dropoff_lat','dropoff_lng','pickup_time','vehicle_type','miles','fare','booking_fee','payment_id','payment_status','commission_rate','commission_amount','settle_fee_charged','settle_period_week','tracking_token','on_way_at','arrived_at','pob_at','completed_at','pin_verified_at','customer_id','passengers','notes','return_job_id','cancelled_at','updated_at'];
+const DRIVER_HEADERS = ['id','name','phone','pin','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','status','zone','last_lat','last_lng','last_location_at','commission_rate','settle_balance','available_since','created_at','updated_at','pin_hash','fcm_token','jobs_completed','jobs_cancelled','jobs_no_show','jobs_abandoned','jobs_declined','reliability_score'];
 const OFFER_HEADERS = ['jobId','currentDriverId','offeredDrivers','expiresAt','pickupLat','pickupLng'];
 const BID_HEADERS = ['created_at','job_id','driver_id','amount','status'];
-const CUSTOMER_HEADERS = ['id','name','phone','email','pin_hash','created_at','status','updated_at','last_login_at','fcm_token'];
+const CUSTOMER_HEADERS = ['id','name','phone','email','pin_hash','created_at','status','updated_at','last_login_at','fcm_token','completed_count','cancellation_count','late_cancellation_count','no_show_count','restriction_level','trust_flags'];
 const PLACE_HEADERS = ['id','customer_id','label','address','lat','lng','type','created_at'];
 const DRIVER_APPLICATION_HEADERS = ['id','status','badge_url','badge_public_id','continuation_token','name','phone','pin_hash','vehicle_type','license_type','vehicle_make_model_colour','reg_last_3','expiry_date','badge_number','created_at','submitted_at','reviewed_at','reviewed_by','rejection_reason','driver_id'];
+const ADMIN_HEADERS = ['id','email','pin_hash','role','created_at','updated_at','last_login_at'];
 
 
 const SMS_TEMPLATES = [
@@ -301,6 +302,7 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'customer/reset-pin') return customerResetPin(body);
   if (r === 'customer/me') return getCustomerMe(body.customerToken);
   if (r === 'customer/jobs') return getCustomerJobs(body.customerToken);
+  if (r === 'customer/cancel-job') return customerCancelJob(body.customerToken, body.jobId, body.reason);
   if (r === 'customer/places') return getCustomerPlaces(body.customerToken);
   if (r === 'customer/places/add') return addCustomerPlace(body.customerToken, body);
   if (r === 'customer/places/delete') return deleteCustomerPlace(body.customerToken, body.placeId);
@@ -332,6 +334,12 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'driver/location') return updateDriverLocation(body, requireDriver(driverId, driverToken).id);
   if (r === 'driver/secure-action') return handleSecureDriverAction(body);
   if (r === 'admin/login') return adminLogin(body);
+  if (r === 'admin/logout') return { ok: CacheService.getScriptCache().remove(adminToken) };
+  if (r === 'admin/setup') return adminSetup(body);
+  if (r === 'admin/recover-password') return adminRecoverPassword(body);
+  if (r === 'admin/me') return requireAdmin(adminToken, (email) => ({ ok: true, email, role: (findAdminByEmail(email) || {}).role || 'admin' }));
+  if (r === 'admin/change-email') return requireAdmin(adminToken, (email) => adminChangeEmail(body, email));
+  if (r === 'admin/change-password') return requireAdmin(adminToken, (email) => adminChangePassword(body, email));
   if (r === 'admin/sms-templates') return requireAdmin(adminToken, () => ({ templates: getSmsTemplatesWithConfig() }));
   if (r === 'admin/pending-sms') return requireAdmin(adminToken, () => ({ messages: getAdminPendingSms() }));
   if (r === 'admin/sms-config') return requireAdmin(adminToken, () => body ? updateSmsConfig(body) : { disabled: getSmsDisabledKeys() });
@@ -341,6 +349,7 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (r === 'admin/future-offers') return requireAdmin(adminToken, () => ({ futureOffers: getAllFutureOffers() }));
   if (r === 'admin/future-offers/dispatch') return requireAdmin(adminToken, () => dispatchFutureBooking(body.jobId));
   if (r === 'admin/tariff') return requireAdmin(adminToken, () => body ? updateTariff(body) : { tariff: getTariff() });
+  if (r === 'admin/settle-config') return requireAdmin(adminToken, () => body ? updateSettleConfig(body) : { settleConfig: getSettleConfig() });
   if (r === 'admin/audit-log') return requireAdmin(adminToken, () => ({ logs: getAuditLogs(body.limit || 200) }));
   if (r === 'admin/bids') return requireAdmin(adminToken, () => ({ bids: getAllBids() }));
   if (parts[0] === 'admin' && parts[1] === 'drivers' && parts[3] === 'letter') return requireAdmin(adminToken, () => { setDriverLetter(parts[2], (body || {}).letter); return { ok: true, driverId: parts[2], letter: (body || {}).letter }; });
@@ -362,9 +371,9 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
 
 function requireAdmin(token, fn) {
   if (!token) throw new Error('Admin not authenticated');
-  const cache = CacheService.getScriptCache();
-  if (!cache.get(token)) throw new Error('Admin not authenticated');
-  return fn();
+  const email = adminSessionEmail(token);
+  if (!email) throw new Error('Admin not authenticated');
+  return fn(email);
 }
 
 // ---------- Spreadsheet helpers ----------
@@ -433,6 +442,7 @@ function getDriversSheet() { return ensureSheet('Drivers', DRIVER_HEADERS); }
 function getOffersSheet() { return ensureSheet('Offers', OFFER_HEADERS); }
 function getBidsSheet() { return ensureSheet('Bids', BID_HEADERS); }
 function getDriverApplicationsSheet() { return ensureSheet('Driver Applications', DRIVER_APPLICATION_HEADERS); }
+function getAdminsSheet() { return ensureSheet('Admins', ADMIN_HEADERS); }
 function getFutureOffersSheet() { return ensureSheet('FutureOffers', ['jobId','currentDriverId','offeredDrivers','expiresAt','pickupLat','pickupLng','currentLetter','offeredLetters']); }
 function getFutureOffers() { return rowsToObjects(getFutureOffersSheet(), ['jobId','currentDriverId','offeredDrivers','expiresAt','pickupLat','pickupLng','currentLetter','offeredLetters']); }
 function futureOfferRowIndex(jobId) { return findRowIndex(getFutureOffersSheet(), row => row[0] === jobId); }
@@ -557,10 +567,10 @@ function getCustomersSheet() {
 
 function maybeMigrateCustomersSheet() {
   const props = PropertiesService.getScriptProperties();
-  if (props.getProperty('customersMigratedV2') === 'true') return;
+  if (props.getProperty('customersMigratedV3') === 'true') return;
   try {
     migrateCustomersSheet();
-    props.setProperty('customersMigratedV2', 'true');
+    props.setProperty('customersMigratedV3', 'true');
   } catch (e) {
     Logger.log('Customer sheet migration failed: %s', e.message || e);
   }
@@ -621,7 +631,7 @@ function migrateCustomersSheet() {
       fcmToken = String(r[9] || '');
     }
 
-    rows.push([id, name, phone, email, pinHash, createdAt, status, updatedAt, lastLoginAt, fcmToken]);
+    rows.push([id, name, phone, email, pinHash, createdAt, status, updatedAt, lastLoginAt, fcmToken, 0, 0, 0, 0, '', '']);
   }
 
   sheet.clear();
@@ -674,7 +684,7 @@ function sendTwilioSms(to, body) {
   });
   if (response.getResponseCode() >= 300) throw new Error('Unable to send SMS');
 }
-function customerResponse(customer) { return { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email || '' }; }
+function customerResponse(customer) { return { id: customer.id, name: customer.name, phone: customer.phone, email: customer.email || '', completedCount: Number(customer.completed_count) || 0, noShowCount: Number(customer.no_show_count) || 0, restrictionLevel: customer.restriction_level || '' }; }
 function customerSmsEnabled() { return PropertiesService.getScriptProperties().getProperty('SMS_ENABLED') === 'true'; }
 
 function getSmsTemplate(key) { return SMS_TEMPLATES.find(t => t.key === key); }
@@ -1062,7 +1072,7 @@ function customerRegister(body) {
   verifyCustomerOtp(phone, String(body.otp || ''));
   if (findCustomerByPhone(phone)) throw new Error('An account already exists for this mobile number. Please log in.');
   const now = new Date().toISOString();
-  const customer = { id: 'CUS-' + shortUuid(), name, phone, email: email || '', pin_hash: hashPin(pin), created_at: now, status: '', updated_at: now, last_login_at: '', fcm_token: '' };
+  const customer = { id: 'CUS-' + shortUuid(), name, phone, email: email || '', pin_hash: hashPin(pin), created_at: now, status: '', updated_at: now, last_login_at: '', fcm_token: '', completed_count: 0, cancellation_count: 0, late_cancellation_count: 0, no_show_count: 0, restriction_level: '', trust_flags: '' };
   getCustomersSheet().appendRow(CUSTOMER_HEADERS.map(h => customer[h]));
   cleanupCustomerOtps(phone);
   writeAudit('customer', customer.id, 'account_created', 'customer', customer.id, { phone });
@@ -1261,6 +1271,20 @@ function getCustomerJobs(token) {
   const customer = requireCustomer(token);
   return { jobs: getJobs().filter(job => job.customer_id === customer.id || (!job.customer_id && normalizePhone(job.customer_phone) === customer.phone)).map(jobResponse).sort((a, b) => new Date(b.pickupTime) - new Date(a.pickupTime)) };
 }
+function customerCancelJob(token, jobId, reason) {
+  const customer = requireCustomer(token);
+  if (!jobId) throw new Error('Missing job ID');
+  const job = findJobById(jobId);
+  if (!job || (job.customer_id !== customer.id && normalizePhone(job.customer_phone) !== normalizePhone(customer.phone))) throw new Error('Booking not found');
+  if (['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(job.status)) throw new Error('Booking is already finished');
+  const now = new Date().toISOString();
+  updateJob(jobId, { status: 'CUSTOMER_CANCELLED', cancelled_at: now });
+  if (job.driver_id) updateDriver(job.driver_id, { status: 'AVAILABLE', available_since: now });
+  writeAudit('customer', customer.id, 'customer_cancelled_job', 'job', jobId, { reason: reason || 'Other' });
+  if (job.customer_id) updateCustomerTrust(job.customer_id, isLateCancellation(job.pickup_time) ? 'late_cancellation' : 'cancelled');
+  sendCustomerCancelledSms(job, 'The journey', '');
+  return { ok: true, status: 'CUSTOMER_CANCELLED' };
+}
 function getCustomerPlaces(token) {
   const customer = requireCustomer(token);
   return { places: rowsToObjects(getPlacesSheet(), PLACE_HEADERS).filter(place => place.customer_id === customer.id).map(place => ({ id: place.id, label: place.label, address: place.address, lat: Number(place.lat), lng: Number(place.lng), type: place.type })) };
@@ -1326,6 +1350,109 @@ function updateDriver(id, updates) {
   sheet.getRange(idx, 1, 1, values.length).setValues([values]);
   SpreadsheetApp.flush();
   return true;
+}
+
+function findCustomerById(id) { return getCustomers().find(c => c.id === id); }
+function updateCustomer(id, updates) {
+  const sheet = getCustomersSheet();
+  const idx = findRowIndex(sheet, row => row[0] === id);
+  if (idx < 0) throw new Error('Customer row not found: ' + id);
+  const headers = CUSTOMER_HEADERS;
+  const current = {};
+  const row = sheet.getRange(idx, 1, 1, headers.length).getValues()[0];
+  headers.forEach((h, i) => current[h] = row[i]);
+  Object.keys(updates).forEach(k => { if (updates[k] !== undefined) current[k] = updates[k]; });
+  sheet.getRange(idx, 1, 1, headers.length).setValues([headers.map(h => current[h])]);
+  SpreadsheetApp.flush();
+  return true;
+}
+
+function getSettleConfig() {
+  const props = PropertiesService.getScriptProperties();
+  return {
+    fee: Math.max(0, Number(props.getProperty('DRIVER_SETTLE_FEE_PER_JOB')) || 1),
+    cap: Math.max(0, Number(props.getProperty('DRIVER_SETTLE_WEEKLY_CAP')) || 10)
+  };
+}
+function updateSettleConfig(body) {
+  const props = PropertiesService.getScriptProperties();
+  const fee = Number(body?.fee);
+  const cap = Number(body?.cap);
+  if (!Number.isFinite(fee) || fee < 0 || !Number.isFinite(cap) || cap < 0) throw new Error('Fee and cap must be non-negative numbers');
+  props.setProperty('DRIVER_SETTLE_FEE_PER_JOB', String(fee));
+  props.setProperty('DRIVER_SETTLE_WEEKLY_CAP', String(cap));
+  return { ok: true, settleConfig: getSettleConfig() };
+}
+
+function getCurrentWeekKey(date) {
+  const d = new Date(date || Date.now());
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const year = d.getFullYear();
+  const week1 = new Date(year, 0, 4);
+  week1.setDate(week1.getDate() + 3 - ((week1.getDay() + 6) % 7));
+  const week = 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000) / 7);
+  return year + '-W' + String(week).padStart(2, '0');
+}
+
+function getDriverWeeklySettleTotal(driverId, weekKey) {
+  return getJobs().reduce((total, job) => {
+    if (job.driver_id === driverId && job.status === 'COMPLETE' && job.settle_period_week === weekKey) {
+      return total + (Number(job.settle_fee_charged) || 0);
+    }
+    return total;
+  }, 0);
+}
+
+function calculateDriverSettleFee(driverId) {
+  const { fee, cap } = getSettleConfig();
+  const weekKey = getCurrentWeekKey();
+  const current = getDriverWeeklySettleTotal(driverId, weekKey);
+  if (cap <= 0 || fee <= 0) return 0;
+  if (current >= cap) return 0;
+  return Math.min(fee, cap - current);
+}
+
+function updateCustomerTrust(customerId, event) {
+  if (!customerId) return;
+  const customer = findCustomerById(customerId);
+  if (!customer) return;
+  const completed = (Number(customer.completed_count) || 0) + (event === 'completed' ? 1 : 0);
+  const cancels = (Number(customer.cancellation_count) || 0) + (event === 'cancelled' || event === 'late_cancellation' ? 1 : 0);
+  const lateCancels = (Number(customer.late_cancellation_count) || 0) + (event === 'late_cancellation' ? 1 : 0);
+  const noShows = (Number(customer.no_show_count) || 0) + (event === 'no_show' ? 1 : 0);
+  let level = '';
+  if (noShows >= 3 || lateCancels >= 3) level = 'card_guarantee';
+  else if (cancels >= 5 || noShows >= 1) level = 'confirmation_required';
+  updateCustomer(customerId, {
+    completed_count: completed,
+    cancellation_count: cancels,
+    late_cancellation_count: lateCancels,
+    no_show_count: noShows,
+    restriction_level: level
+  });
+}
+
+function isLateCancellation(pickupTime) {
+  const pickup = new Date(pickupTime).getTime();
+  return !Number.isNaN(pickup) && (pickup - Date.now()) < 30 * 60 * 1000;
+}
+
+function updateDriverReliability(driverId, event) {
+  if (!driverId || !event) return;
+  const driver = findDriverById(driverId);
+  if (!driver) return;
+  const completed = (Number(driver.jobs_completed) || 0) + (event === 'completed' ? 1 : 0);
+  const cancelled = (Number(driver.jobs_cancelled) || 0) + (event === 'cancelled' ? 1 : 0);
+  const noShow = (Number(driver.jobs_no_show) || 0) + (event === 'no_show' ? 1 : 0);
+  const abandoned = (Number(driver.jobs_abandoned) || 0) + (event === 'abandoned' ? 1 : 0);
+  const declined = (Number(driver.jobs_declined) || 0) + (event === 'declined' ? 1 : 0);
+  const total = completed + cancelled + noShow + abandoned + declined;
+  let score = 100;
+  if (total > 0) {
+    score = Math.round((completed / total) * 100);
+  }
+  updateDriver(driverId, { jobs_completed: completed, jobs_cancelled: cancelled, jobs_no_show: noShow, jobs_abandoned: abandoned, jobs_declined: declined, reliability_score: score });
 }
 
 function cloudinarySignature(value, secret) {
@@ -1426,7 +1553,8 @@ function approveDriverApplication(applicationId) {
     id: driverId, name: application.name, phone: application.phone, pin: '', pin_hash: application.pin_hash, vehicle_type: application.vehicle_type,
     license_type: application.license_type, vehicle_make_model_colour: application.vehicle_make_model_colour, reg_last_3: application.reg_last_3,
     expiry_date: application.expiry_date, badge_number: application.badge_number, status: 'AVAILABLE', zone: '', last_lat: '', last_lng: '',
-    last_location_at: '', commission_rate: 0, settle_balance: 0, available_since: now
+    last_location_at: '', commission_rate: 0, settle_balance: 0, available_since: now,
+    jobs_completed: 0, jobs_cancelled: 0, jobs_no_show: 0, jobs_abandoned: 0, jobs_declined: 0, reliability_score: 100
   };
   getDriversSheet().appendRow(DRIVER_HEADERS.map(header => driver[header] !== undefined ? driver[header] : ''));
   updateDriverApplication(application.id, { status: 'APPROVED', reviewed_at: now, reviewed_by: 'admin', driver_id: driverId });
@@ -1651,9 +1779,10 @@ function jobResponse(job) {
     pickupTime: job.pickup_time, vehicleType: job.vehicle_type,
     fare: Number(job.fare) || 0, bookingFee: Number(job.booking_fee) || 0,
     commissionRate: Number(job.commission_rate) || 0, commissionAmount: Number(job.commission_amount) || 0,
+    settleFeeCharged: Number(job.settle_fee_charged) || 0, settlePeriodWeek: job.settle_period_week || '',
     paymentStatus: job.payment_status, trackingToken: job.tracking_token,
     createdAt: job.created_at, onWayAt: job.on_way_at, arrivedAt: job.arrived_at,
-    pobAt: job.pob_at, completedAt: job.completed_at,
+    pobAt: job.pob_at, completedAt: job.completed_at, pinVerifiedAt: job.pin_verified_at || null,
     pobWaitingRate: Number(notes.pobWaitingRate) || getWaitingRate(job.vehicle_type || 'car', pobAt),
     pobMeterStartedAt: notes.pobMeterStartedAt || null,
     meterDistance, meterWaitingSeconds, meterFare
@@ -1763,9 +1892,7 @@ function allocateImmediateJob(jobId) {
 }
 
 function isJobReadyForOffer(job) {
-  if (job.status !== 'NEW') return false;
-  if (job.payment_status === 'BOOKING_FEE_PAID') return true;
-  return !squarePaymentsEnabled();
+  return job.status === 'NEW';
 }
 
 function allocatePendingAsapJobs() {
@@ -1791,7 +1918,6 @@ function createBooking(body) {
   if (Number.isNaN(pickupTime.getTime()) || pickupTime.getTime() < Date.now() - 60000) throw new Error('Please choose a valid pickup time');
   const isAirport = airportFare != null;
   const isFutureBooking = isAirport || pickupTime.getTime() > Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
-  const paymentRequired = squarePaymentsEnabled();
   const bookingNotes = {
     luggage: Number(p.luggage) || 0,
     flightNumber: p.flightNumber || '',
@@ -1799,14 +1925,14 @@ function createBooking(body) {
     accessibility: p.accessibility || '',
     customerNotes: p.customerNotes || ''
   };
-  Logger.log('createBooking: pendingBookingId=%s paymentRequired=%s', jobId, paymentRequired);
+  Logger.log('createBooking: pendingBookingId=%s (free booking)', jobId);
 
-  // Store the booking as pending until the customer successfully pays the £1 fee.
-  // This prevents failed / abandoned payments from creating real jobs.
+  // Store the booking as pending until the customer confirms it.
+  // No customer payment is taken; drivers pay the platform fee after completion.
   appendPendingBooking({
     created_at: new Date().toISOString(),
     id: jobId,
-    status: 'PENDING_PAYMENT',
+    status: 'PENDING_CONFIRMATION',
     driver_id: '',
     customer_name: customerName,
     customer_phone: customerPhone,
@@ -1820,9 +1946,9 @@ function createBooking(body) {
     vehicle_type: p.vehicleType || 'car',
     miles: miles,
     fare: fare,
-    booking_fee: bookingFee,
+    booking_fee: 0,
     payment_id: '',
-    payment_status: 'HELD',
+    payment_status: 'FREE',
     commission_rate: 0,
     commission_amount: '',
     tracking_token: token,
@@ -1832,19 +1958,19 @@ function createBooking(body) {
     updated_at: new Date().toISOString()
   });
 
-  writeAudit(customer ? 'customer' : 'guest', customer ? customer.id : customerPhone, 'booking_pending_payment', 'pendingBooking', jobId, { paymentRequired });
-  return { ok: true, pendingBookingId: jobId, fare, bookingFee, trackingToken: token, clientSecret: paymentRequired ? 'square' : null };
+  writeAudit(customer ? 'customer' : 'guest', customer ? customer.id : customerPhone, 'booking_pending_confirmation', 'pendingBooking', jobId, { freeBooking: true });
+  return { ok: true, pendingBookingId: jobId, fare, bookingFee: 0, trackingToken: token, clientSecret: null };
 }
 
 function confirmBooking(body) {
-  const { pendingBookingId, sourceId } = body || {};
-  Logger.log('confirmBooking: pendingBookingId=%s sourceId=%s', pendingBookingId, sourceId ? 'present' : 'missing');
+  const { pendingBookingId } = body || {};
+  Logger.log('confirmBooking: pendingBookingId=%s (free booking)', pendingBookingId);
   if (!pendingBookingId) throw new Error('Missing pending booking ID');
 
   // If the booking was already confirmed, return the existing job.
   const existingJob = findJobById(pendingBookingId);
   if (existingJob) {
-    if (existingJob.payment_status === 'BOOKING_FEE_PAID') {
+    if (existingJob.payment_status === 'FREE') {
       return { ok: true, jobId: pendingBookingId, fare: Number(existingJob.fare), bookingFee: Number(existingJob.booking_fee), trackingToken: existingJob.tracking_token };
     }
     throw new Error('This booking has already been processed. Please create a new booking.');
@@ -1858,22 +1984,16 @@ function confirmBooking(body) {
   const isFutureBooking = pickupTime > Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
   const status = isFutureBooking || isAirport ? 'SCHEDULED' : 'NEW';
 
-  let paymentId = '';
-  if (squarePaymentsEnabled()) {
-    const payment = createSquarePayment(pending, sourceId);
-    paymentId = payment.id;
-  }
-
   const now = new Date().toISOString();
   const job = movePendingToJob(pendingBookingId, {
     status,
-    payment_id: paymentId,
-    payment_status: 'BOOKING_FEE_PAID',
+    payment_id: '',
+    payment_status: 'FREE',
     updated_at: now
   });
   if (!job) throw new Error('Could not create booking. Please try again.');
 
-  writeAudit('customer', job.customer_id || job.customer_phone, 'booking_confirmed', 'job', pendingBookingId, { provider: squarePaymentsEnabled() ? 'square' : 'none', paymentId: paymentId || '', amount: Number(job.booking_fee) });
+  writeAudit('customer', job.customer_id || job.customer_phone, 'booking_confirmed', 'job', pendingBookingId, { freeBooking: true });
   sendBookingConfirmedSms(job);
 
   if (isFutureBooking || isAirport) {
@@ -1915,14 +2035,14 @@ function createReturnPair(body) {
 }
 
 function confirmReturnPair(body) {
-  const { outboundPendingBookingId, returnPendingBookingId, sourceId } = body || {};
-  Logger.log('confirmReturnPair: outbound=%s return=%s', outboundPendingBookingId, returnPendingBookingId);
+  const { outboundPendingBookingId, returnPendingBookingId } = body || {};
+  Logger.log('confirmReturnPair: outbound=%s return=%s (free booking)', outboundPendingBookingId, returnPendingBookingId);
   if (!outboundPendingBookingId || !returnPendingBookingId) throw new Error('Missing pending booking IDs');
 
-  // Idempotency: if both jobs already exist and are paid, return success.
+  // Idempotency: if both jobs already exist and are free bookings, return success.
   const existingOutbound = findJobById(outboundPendingBookingId);
   const existingReturn = findJobById(returnPendingBookingId);
-  if (existingOutbound && existingReturn && existingOutbound.payment_status === 'BOOKING_FEE_PAID' && existingReturn.payment_status === 'BOOKING_FEE_PAID') {
+  if (existingOutbound && existingReturn && existingOutbound.payment_status === 'FREE' && existingReturn.payment_status === 'FREE') {
     return { ok: true, outboundJobId: outboundPendingBookingId, returnJobId: returnPendingBookingId, fare: Number(existingOutbound.fare) + Number(existingReturn.fare), bookingFee: Number(existingOutbound.booking_fee) + Number(existingReturn.booking_fee) };
   }
 
@@ -1930,23 +2050,16 @@ function confirmReturnPair(body) {
   const ret = findPendingJobById(returnPendingBookingId);
   if (!outbound || !ret) throw new Error('Booking not found. It may have expired.');
 
-  let paymentId = '';
-  if (squarePaymentsEnabled()) {
-    const totalBookingFee = (Number(outbound.booking_fee) || 0) + (Number(ret.booking_fee) || 0);
-    const payment = createSquarePaymentForAmount(totalBookingFee, sourceId, outboundPendingBookingId + '-' + returnPendingBookingId, 'Booking fees for ' + outboundPendingBookingId + ' and ' + returnPendingBookingId);
-    paymentId = payment.id;
-  }
-
   const now = new Date().toISOString();
-  const outboundJob = movePendingToJob(outboundPendingBookingId, { status: 'SCHEDULED', payment_id: paymentId, payment_status: 'BOOKING_FEE_PAID', updated_at: now });
-  const returnJob = movePendingToJob(returnPendingBookingId, { status: 'SCHEDULED', payment_id: paymentId, payment_status: 'BOOKING_FEE_PAID', updated_at: now });
+  const outboundJob = movePendingToJob(outboundPendingBookingId, { status: 'SCHEDULED', payment_id: '', payment_status: 'FREE', updated_at: now });
+  const returnJob = movePendingToJob(returnPendingBookingId, { status: 'SCHEDULED', payment_id: '', payment_status: 'FREE', updated_at: now });
   if (!outboundJob || !returnJob) throw new Error('Could not confirm both journeys. Please try again.');
 
   // Link the two legs so two-way-specific SMS templates and driver offers are used.
   updateJob(outboundJob.id, { return_job_id: returnJob.id, updated_at: now });
   updateJob(returnJob.id, { return_job_id: outboundJob.id, updated_at: now });
 
-  writeAudit('customer', outboundJob.customer_id || outboundJob.customer_phone, 'booking_confirmed', 'job', outboundPendingBookingId + ',' + returnPendingBookingId, { provider: squarePaymentsEnabled() ? 'square' : 'none', paymentId: paymentId || '', amount: Number(outboundJob.booking_fee) + Number(returnJob.booking_fee) });
+  writeAudit('customer', outboundJob.customer_id || outboundJob.customer_phone, 'booking_confirmed', 'job', outboundPendingBookingId + ',' + returnPendingBookingId, { freeBooking: true });
   sendBookingConfirmedSms(findJobById(outboundJob.id));
   sendBookingConfirmedSms(findJobById(returnJob.id));
 
@@ -1971,8 +2084,15 @@ function setJobStatus(jobId, body, driverId) {
     updateJob(jobId, { status, cancelled_at: now });
     updateDriver(driverId, { status: 'AVAILABLE', available_since: now });
     writeAudit('driver', driverId, 'job_status_changed', 'job', jobId, { from: job.status, to: status });
-    if (status === 'NO_SHOW') sendCustomerNoShowSms(findJobById(jobId));
-    if (status === 'CUSTOMER_CANCELLED') sendCustomerCancelledSms(findJobById(jobId));
+    if (status === 'NO_SHOW') {
+      sendCustomerNoShowSms(findJobById(jobId));
+      if (job.customer_id) updateCustomerTrust(job.customer_id, 'no_show');
+      updateDriverReliability(driverId, 'no_show');
+    }
+    if (status === 'CUSTOMER_CANCELLED') {
+      sendCustomerCancelledSms(findJobById(jobId));
+      if (job.customer_id) updateCustomerTrust(job.customer_id, 'late_cancellation');
+    }
     return { ok: true, status };
   }
   const nextStatus = { ASSIGNED: 'ON_WAY', ON_WAY: 'ARRIVED', ARRIVED: 'POB', POB: 'COMPLETE' };
@@ -2013,22 +2133,26 @@ function setJobStatus(jobId, body, driverId) {
 
   if (status === 'COMPLETE') {
     const driver = findDriverById(driverId);
-    const rate = Number(driver?.commission_rate) || 0;
-    let actualFare = Number(job.fare) || 0;
-    try {
-      const notes = JSON.parse(job.notes || '{}');
-      if (notes.meterFare && Number(notes.meterFare) > 0) actualFare = Number(notes.meterFare);
-    } catch (e) {}
-    const commission = rate > 0 ? Math.round(actualFare * rate) / 100 : 0;
+    const settleFee = calculateDriverSettleFee(driverId);
+    const weekKey = getCurrentWeekKey();
     updateDriver(driverId, {
       status: 'AVAILABLE',
       available_since: now,
-      settle_balance: (Number(driver?.settle_balance) || 0) + commission
+      settle_balance: (Number(driver?.settle_balance) || 0) + settleFee
     });
-    updateJob(jobId, { commission_amount: commission });
+    updateJob(jobId, {
+      commission_amount: 0,
+      settle_fee_charged: settleFee,
+      settle_period_week: weekKey
+    });
+    if (job.customer_id) updateCustomerTrust(job.customer_id, 'completed');
+    updateDriverReliability(driverId, 'completed');
     const completedJob = findJobById(jobId);
     sendJourneyCompletedSms(completedJob);
     if (completedJob.customer_id) sendPushToCustomer(completedJob.customer_id, 'Journey Complete', 'Thanks for riding with Wirral Jobe!', {});
+    if (settleFee > 0) {
+      Logger.log('Driver %s charged settle fee £%s for job %s (week %s)', driverId, settleFee, jobId, weekKey);
+    }
   }
   return { ok: true, status };
 }
@@ -2217,6 +2341,7 @@ function declineOffer(jobId, driverId) {
     offered.push(next.id);
     sheet.getRange(idx, 2, 1, 3).setValues([[next.id, JSON.stringify(offered), Date.now() + 60000]]);
   }
+  updateDriverReliability(driverId, 'declined');
   SpreadsheetApp.flush();
   return { ok: true };
 }
@@ -2578,21 +2703,154 @@ function bulkUpdateDrivers(body) {
 
 // ---------- Admin ----------
 
-function adminLogin(body) {
-  const { password } = body || {};
-  if (!password) throw new Error('Invalid admin password');
-  const hashedInput = hashPin(password);
-  if (ADMIN_PASSWORD_HASH) {
-    if (hashedInput !== ADMIN_PASSWORD_HASH) throw new Error('Invalid admin password');
-  } else if (ADMIN_PASSWORD) {
-    Logger.log('WARNING: ADMIN_PASSWORD is deprecated. Set ADMIN_PASSWORD_HASH instead.');
-    if (password !== ADMIN_PASSWORD) throw new Error('Invalid admin password');
-  } else {
-    throw new Error('Admin password not configured');
-  }
+const ADMIN_SESSION_TTL_SECONDS = 21600; // 6 hours
+const ADMIN_MAX_FAILED_ATTEMPTS = 5;
+const ADMIN_LOCKOUT_MINUTES = 10;
+
+function getAdmins() { return rowsToObjects(getAdminsSheet(), ADMIN_HEADERS); }
+function findAdminByEmail(email) { return getAdmins().find(a => String(a.email || '').toLowerCase() === String(email || '').toLowerCase()); }
+
+function isAdminLoginLocked(email) {
+  const cache = CacheService.getScriptCache();
+  const key = 'admin-fail-' + email;
+  const data = cache.get(key);
+  if (!data) return false;
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed.lockedUntil && Date.now() < parsed.lockedUntil) return true;
+  } catch (e) {}
+  return false;
+}
+
+function recordAdminLoginFailure(email) {
+  const cache = CacheService.getScriptCache();
+  const key = 'admin-fail-' + email;
+  let count = 0;
+  const data = cache.get(key);
+  try { if (data) count = JSON.parse(data).count || 0; } catch (e) {}
+  count += 1;
+  const lockedUntil = count >= ADMIN_MAX_FAILED_ATTEMPTS ? Date.now() + ADMIN_LOCKOUT_MINUTES * 60000 : null;
+  cache.put(key, JSON.stringify({ count, lockedUntil }), lockedUntil ? ADMIN_LOCKOUT_MINUTES * 60 : 60 * 60);
+  return !!lockedUntil;
+}
+
+function clearAdminLoginFailures(email) {
+  CacheService.getScriptCache().remove('admin-fail-' + email);
+}
+
+function createAdminSession(email) {
   const token = Utilities.getUuid();
-  CacheService.getScriptCache().put(token, '1', 3600);
-  return { token };
+  CacheService.getScriptCache().put(token, email, ADMIN_SESSION_TTL_SECONDS);
+  return token;
+}
+
+function adminSessionEmail(token) {
+  if (!token) return null;
+  return CacheService.getScriptCache().get(token);
+}
+
+function migrateLegacyAdminPassword() {
+  if (getAdmins().length > 0) return;
+  const props = PropertiesService.getScriptProperties();
+  const legacyHash = props.getProperty('ADMIN_PASSWORD_HASH');
+  if (!legacyHash) return;
+  const email = String(props.getProperty('ADMIN_EMAIL') || 'bry92ai@gmail.com').toLowerCase().trim();
+  const now = new Date().toISOString();
+  const admin = { id: 'ADM-' + shortUuid(), email, pin_hash: legacyHash, role: 'owner', created_at: now, updated_at: now, last_login_at: '' };
+  getAdminsSheet().appendRow(ADMIN_HEADERS.map(h => admin[h]));
+  writeAudit('system', email, 'admin_legacy_migration', 'admin', admin.id, {});
+  Logger.log('Migrated legacy admin password to Admins sheet for %s', email);
+}
+
+function adminLogin(body) {
+  migrateLegacyAdminPassword();
+  const { email, password } = body || {};
+  if (!email || !password) throw new Error('Email and password are required');
+  const normalized = String(email).toLowerCase().trim();
+  if (isAdminLoginLocked(normalized)) throw new Error('Too many failed attempts. Please try again in ' + ADMIN_LOCKOUT_MINUTES + ' minutes.');
+  const admin = findAdminByEmail(normalized);
+  if (!admin) {
+    recordAdminLoginFailure(normalized);
+    throw new Error('Invalid email or password');
+  }
+  if (hashPin(password) !== admin.pin_hash) {
+    recordAdminLoginFailure(normalized);
+    throw new Error('Invalid email or password');
+  }
+  clearAdminLoginFailures(normalized);
+  const now = new Date().toISOString();
+  updateAdmin(admin.id, { last_login_at: now });
+  const token = createAdminSession(normalized);
+  writeAudit('admin', normalized, 'admin_login', 'admin', admin.id, {});
+  return { token, email: normalized, role: admin.role || 'admin' };
+}
+
+function updateAdmin(id, updates) {
+  const sheet = getAdminsSheet();
+  const idx = findRowIndex(sheet, row => row[0] === id);
+  if (idx < 0) throw new Error('Admin not found');
+  const current = {};
+  const row = sheet.getRange(idx, 1, 1, ADMIN_HEADERS.length).getValues()[0];
+  ADMIN_HEADERS.forEach((h, i) => current[h] = row[i]);
+  Object.keys(updates).forEach(k => { if (updates[k] !== undefined) current[k] = updates[k]; });
+  sheet.getRange(idx, 1, 1, ADMIN_HEADERS.length).setValues([ADMIN_HEADERS.map(h => current[h])]);
+  SpreadsheetApp.flush();
+}
+
+function adminSetup(body) {
+  const { setupToken, email, password } = body || {};
+  const expected = PropertiesService.getScriptProperties().getProperty('ADMIN_SETUP_TOKEN');
+  if (!expected || expected !== setupToken) throw new Error('Invalid setup token');
+  if (getAdmins().length > 0) throw new Error('Admin account already exists');
+  if (!email || !password || password.length < 12) throw new Error('Email and a password of at least 12 characters are required');
+  const normalized = String(email).toLowerCase().trim();
+  const now = new Date().toISOString();
+  const admin = { id: 'ADM-' + shortUuid(), email: normalized, pin_hash: hashPin(password), role: 'owner', created_at: now, updated_at: now, last_login_at: '' };
+  getAdminsSheet().appendRow(ADMIN_HEADERS.map(h => admin[h]));
+  writeAudit('system', normalized, 'admin_setup', 'admin', admin.id, {});
+  return { ok: true, email: normalized };
+}
+
+function adminChangeEmail(body, tokenEmail) {
+  const { newEmail } = body || {};
+  if (!newEmail) throw new Error('New email is required');
+  const normalized = String(newEmail).toLowerCase().trim();
+  const admin = findAdminByEmail(tokenEmail);
+  if (!admin) throw new Error('Admin not found');
+  if (findAdminByEmail(normalized) && normalized !== tokenEmail) throw new Error('Email already in use');
+  const now = new Date().toISOString();
+  updateAdmin(admin.id, { email: normalized, updated_at: now });
+  // Existing sessions now point to old email; invalidate them by re-issuing token.
+  const token = createAdminSession(normalized);
+  writeAudit('admin', normalized, 'admin_email_changed', 'admin', admin.id, { previousEmail: tokenEmail });
+  return { ok: true, token, email: normalized };
+}
+
+function adminChangePassword(body, tokenEmail) {
+  const { currentPassword, newPassword } = body || {};
+  if (!currentPassword || !newPassword) throw new Error('Current and new password are required');
+  if (newPassword.length < 12) throw new Error('New password must be at least 12 characters');
+  const admin = findAdminByEmail(tokenEmail);
+  if (!admin) throw new Error('Admin not found');
+  if (admin.pin_hash !== hashPin(currentPassword)) throw new Error('Current password is incorrect');
+  const now = new Date().toISOString();
+  updateAdmin(admin.id, { pin_hash: hashPin(newPassword), updated_at: now });
+  writeAudit('admin', tokenEmail, 'admin_password_changed', 'admin', admin.id, {});
+  return { ok: true };
+}
+
+function adminRecoverPassword(body) {
+  const { recoveryToken, email, newPassword } = body || {};
+  const expected = PropertiesService.getScriptProperties().getProperty('ADMIN_RECOVERY_TOKEN');
+  if (!expected || expected !== recoveryToken) throw new Error('Invalid recovery token');
+  if (!email || !newPassword || newPassword.length < 12) throw new Error('Email and a password of at least 12 characters are required');
+  const normalized = String(email).toLowerCase().trim();
+  const admin = findAdminByEmail(normalized);
+  if (!admin) throw new Error('Admin not found');
+  const now = new Date().toISOString();
+  updateAdmin(admin.id, { pin_hash: hashPin(newPassword), updated_at: now });
+  writeAudit('system', normalized, 'admin_password_recovered', 'admin', admin.id, {});
+  return { ok: true };
 }
 
 function adminAssign(body) {
@@ -2618,7 +2876,8 @@ function createAdminDriver(body) {
     id, name, phone, pin: '', pin_hash: hashPin(pin), vehicle_type, license_type: license_type || 'private_hire',
     vehicle_make_model_colour: vehicle_make_model_colour || '', reg_last_3: reg_last_3 || '', expiry_date: expiry_date || '', badge_number: badge_number || '',
     status: 'AVAILABLE', zone: '', last_lat: '', last_lng: '', last_location_at: '', commission_rate: Number(commission_rate) || 0,
-    settle_balance: 0, available_since: now, created_at: now, updated_at: now
+    settle_balance: 0, available_since: now, created_at: now, updated_at: now,
+    jobs_completed: 0, jobs_cancelled: 0, jobs_no_show: 0, jobs_abandoned: 0, jobs_declined: 0, reliability_score: 100
   };
   getDriversSheet().appendRow(DRIVER_HEADERS.map(header => driver[header] !== undefined ? driver[header] : ''));
   SpreadsheetApp.flush();
