@@ -4,6 +4,8 @@ dist/
 .env.local
 .env.*.local
 service-account.json
+android/app/google-services.json
+android/app/wirraljobe.keystore
 *.sqlite
 *.sqlite3
 .netlify/
