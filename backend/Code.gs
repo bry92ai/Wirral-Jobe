@@ -4,6 +4,7 @@ const ADMIN_PASSWORD = PropertiesService.getScriptProperties().getProperty('ADMI
 const FUTURE_ALLOCATION_WINDOW_MINUTES = 45;
 const EARLY_FUTURE_WINDOW_MS = 36 * 60 * 60 * 1000;
 const DIRECT_OFFER_WINDOW_MS = 60 * 1000;
+const BID_WINDOW_MS = 60 * 1000;
 const FUTURE_OFFER_WINDOW_MS = 12 * 60 * 60 * 1000;
 const LIVE_DISPATCH_LEAD_MINUTES = 15;
 const LIVE_ESCALATION_AFTER_MS = 10 * 60 * 1000;
@@ -2587,6 +2588,20 @@ function resolveBidWinner(jobId, pickupLat, pickupLng) {
   return scored[0].driverId;
 }
 
+function closeBidWindow(jobId, winnerId) {
+  const sheet = getBidsSheet();
+  const rows = sheet.getDataRange().getValues();
+  let changed = 0;
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][1] === jobId) {
+      const status = rows[i][2] === winnerId ? 'won' : 'unsuccessful';
+      sheet.getRange(i + 1, 5).setValue(status);
+      changed++;
+    }
+  }
+  if (changed) writeAudit('system', '', 'bid_window_closed', 'job', jobId, { winnerId, bidsChanged: changed });
+}
+
 function advanceOffers() {
   const sheet = getOffersSheet();
   const offers = getOffers();
@@ -2598,6 +2613,7 @@ function advanceOffers() {
       if (idx < 1) return;
       if (offer.currentDriverId === BIDDING_COUNTDOWN_DRIVER) {
         const winnerId = resolveBidWinner(offer.jobId, Number(offer.pickupLat), Number(offer.pickupLng));
+        closeBidWindow(offer.jobId, winnerId);
         const nowIso = new Date().toISOString();
         sheet.deleteRow(idx);
         SpreadsheetApp.flush();
@@ -2606,6 +2622,7 @@ function advanceOffers() {
           updateJob(offer.jobId, { status: 'OFFERED', updated_at: nowIso });
         } else {
           updateJob(offer.jobId, { status: 'BIDDING', updated_at: nowIso });
+          notifyAvailableDrivers(findJobById(offer.jobId), 'job_available', 'New job available');
         }
         return;
       }
@@ -2722,14 +2739,35 @@ function declineOfferUnlocked(jobId, driverId) {
 
 // ---------- Bids ----------
 
+function startMissingBidWindows() {
+  const nowMs = Date.now();
+  const jobs = getJobs().filter(j => j.status === 'BIDDING');
+  const offers = getOffers();
+  const bids = getBids();
+  jobs.forEach(job => {
+    if (offers.some(o => o.jobId === job.id)) return;
+    if (!bids.some(b => b.job_id === job.id)) return;
+    getOffersSheet().appendRow([job.id, BIDDING_COUNTDOWN_DRIVER, '[]', nowMs + BID_WINDOW_MS, Number(job.pickup_lat), Number(job.pickup_lng)]);
+    writeAudit('system', '', 'bid_window_reopened', 'job', job.id, { closesAt: nowMs + BID_WINDOW_MS });
+  });
+}
+
 function getBidBoard(driverId) {
+  startMissingBidWindows();
+  advanceOffers();
+  const nowMs = Date.now();
   const jobs = getJobs().filter(j => j.status === 'BIDDING');
   const bids = getBids();
+  const offers = getOffers();
   return { jobs: jobs.map(job => {
     const resp = jobResponse(job);
+    const offer = offers.find(o => o.jobId === job.id && o.currentDriverId === BIDDING_COUNTDOWN_DRIVER);
+    const hasBids = bids.some(b => b.job_id === job.id);
+    resp.biddingOpen = (offer && Number(offer.expiresAt) > nowMs) || (!offer && !hasBids);
+    resp.bidClosesAt = offer && Number(offer.expiresAt) > nowMs ? Number(offer.expiresAt) : null;
     resp.myBid = bids.find(b => b.job_id === job.id && b.driver_id === driverId) || null;
     return resp;
-  }) };
+  }).filter(job => job.biddingOpen) };
 }
 
 function getMyBids(driverId) {
@@ -2759,11 +2797,11 @@ function placeBidUnlocked(jobId, body, driverId) {
   getBidsSheet().appendRow([now, jobId, driverId, amount, 'pending']);
   const offerIdx = offerRowIndex(jobId);
   if (offerIdx < 0) {
-    getOffersSheet().appendRow([jobId, BIDDING_COUNTDOWN_DRIVER, '[]', Date.now() + 5000, Number(job.pickup_lat), Number(job.pickup_lng)]);
+    getOffersSheet().appendRow([jobId, BIDDING_COUNTDOWN_DRIVER, '[]', Date.now() + BID_WINDOW_MS, Number(job.pickup_lat), Number(job.pickup_lng)]);
   } else {
-    getOffersSheet().getRange(offerIdx, 2, 1, 3).setValues([[BIDDING_COUNTDOWN_DRIVER, '[]', Date.now() + 5000]]);
+    getOffersSheet().getRange(offerIdx, 2, 1, 3).setValues([[BIDDING_COUNTDOWN_DRIVER, '[]', Date.now() + BID_WINDOW_MS]]);
   }
-  writeAudit('driver', driverId, 'bid_placed', 'job', jobId, { amount, window: '5s' });
+  writeAudit('driver', driverId, 'bid_placed', 'job', jobId, { amount, window: '60s' });
   SpreadsheetApp.flush();
   advanceOffers();
   return { ok: true, status: 'BIDDING', driverId, fare: Number(job.fare) || 0 };
@@ -2874,6 +2912,7 @@ function processScheduledCustomerSms() {
 }
 function runScheduledTasks() {
   withScriptLock(() => {
+    startMissingBidWindows();
     advanceOffers();
     advanceFutureOffers();
     processFutureBookings();

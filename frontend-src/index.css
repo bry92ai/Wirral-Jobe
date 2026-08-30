@@ -731,3 +731,17 @@ select option { background: var(--surface); color: var(--cream); }
   .wj-shell { padding: 0; justify-content: flex-start; }
   .wj-frame { min-height: 100vh; max-height: none; border: 0; border-radius: 0; padding: 1.4rem 1.35rem 2rem; box-shadow: none; }
 }
+
+/* Subtle motion / feedback */
+@keyframes wj-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.wj-bid-job, .card, .wj-job-card, .wj-panel {
+  animation: wj-fade-up 220ms ease-out;
+}
+button, .btn { transition: transform 80ms ease, box-shadow 120ms ease; }
+button:active, .btn:active { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .wj-bid-job, .card, .wj-job-card, .wj-panel { animation: none; }
+}

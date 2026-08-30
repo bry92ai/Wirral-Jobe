@@ -66,8 +66,8 @@ function addRouteLayer(map, route) {
   if (source) source.setData(data);
   else {
     map.addSource('driver-route', { type: 'geojson', data });
-    map.addLayer({ id: 'driver-route-outline', type: 'line', source: 'driver-route', paint: { 'line-color': '#111827', 'line-width': 10, 'line-opacity': 0.75 } });
-    map.addLayer({ id: 'driver-route-line', type: 'line', source: 'driver-route', paint: { 'line-color': '#f4bf1b', 'line-width': 6, 'line-opacity': 1 } });
+    map.addLayer({ id: 'driver-route-outline', type: 'line', source: 'driver-route', paint: { 'line-color': '#1f2937', 'line-width': 14, 'line-opacity': 0.9, 'line-cap': 'round', 'line-join': 'round' } });
+    map.addLayer({ id: 'driver-route-line', type: 'line', source: 'driver-route', paint: { 'line-color': '#f4bf1b', 'line-width': 8, 'line-opacity': 1, 'line-cap': 'round', 'line-join': 'round' } });
   }
 }
 
@@ -88,7 +88,7 @@ export default function DriverNavigationMap({ myLocation, heading, activeJob, th
     mapboxgl.accessToken = ACCESS_TOKEN;
     const map = new mapboxgl.Map({
       container: containerRef.current,
-      style: `mapbox://styles/mapbox/${theme === 'dark' ? 'navigation-night-v1' : 'outdoors-v12'}`,
+      style: `mapbox://styles/mapbox/${theme === 'dark' ? 'navigation-night-v1' : 'navigation-day-v1'}`,
       center: myLocation ? [myLocation.lng, myLocation.lat] : [-3.05, 53.393],
       zoom: 17.5,
       pitch: 58,

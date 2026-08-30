@@ -1449,9 +1449,11 @@ function DriverPageContent() {
                         const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
                         const runningRoute = offerRoutes[job.jobId];
                         const fareMiles = Number(job.miles);
+                        const bidSecondsLeft = job.bidClosesAt ? Math.max(0, Math.ceil((job.bidClosesAt - now) / 1000)) : null;
+                        const bidTimerText = bidSecondsLeft != null ? `${bidSecondsLeft}s left` : 'Bid to start 60s window';
                         return (
                           <article key={job.jobId} className="wj-bid-job">
-                            <div className="wj-bid-heading"><div><h3>New bid</h3><p>Review the job details below and ask for it if you're available.</p></div><span className="wj-bid-availability"><i />Online<small>{queueInfo.zoneName}</small></span></div>
+                            <div className="wj-bid-heading"><div><h3>New bid <span className="wj-bid-timer">· {bidTimerText}</span></h3><p>Review the job details below and ask for it if you're available.</p></div><span className="wj-bid-availability"><i />Online<small>{queueInfo.zoneName}</small></span></div>
                             <div className="wj-bid-details">
                               <div><span className="wj-bid-icon">●</span><p>Running distance<strong>{runningRoute ? `${runningRoute.miles.toFixed(1)} mi` : 'Calculating…'}</strong><small>{runningRoute?.durationText || 'Road route to pickup'}</small></p></div>
                               <div><span className="wj-bid-icon">£</span><p>Maximum fare amount<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
@@ -1483,9 +1485,12 @@ function DriverPageContent() {
                         const pickupZone = findZone(job.pickupLat, job.pickupLng);
                         const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
                         const accepted = job.status && job.status !== 'BIDDING';
+                        let statusText = accepted ? 'Assigned to you' : 'Waiting to be assigned';
+                        if (bid.status === 'won') statusText = 'You won — awaiting offer';
+                        if (bid.status === 'unsuccessful') statusText = 'Bid unsuccessful';
                         return (
                           <article key={bid.job_id || bid.created_at} className="wj-bid-job">
-                            <div className="wj-bid-heading"><div><h3>Your bid</h3><p>{accepted ? 'Assigned to you' : 'Waiting to be assigned'}</p></div><span className="wj-bid-availability"><i />{formatCurrency(bid.amount)}</span></div>
+                            <div className="wj-bid-heading"><div><h3>Your bid</h3><p>{statusText}</p></div><span className="wj-bid-availability"><i />{formatCurrency(bid.amount)}</span></div>
                             <div className="wj-bid-details">
                               <div><span className="wj-bid-icon">●</span><p>Pickup<strong>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : job.pickupAddress}</strong><small>{job.pickupAddress}</small></p></div>
                               <div><span className="wj-bid-icon">↓</span><p>Drop-off<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : job.dropoffAddress}</strong><small>{job.dropoffAddress}</small></p></div>
