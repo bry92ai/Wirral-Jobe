@@ -35,6 +35,8 @@ public class LocationPermissionPlugin extends Plugin {
         // expects the user to enable it from Settings. We still request it where possible.
         if (getPermissionState("fineLocation") != PermissionState.GRANTED) {
             requestPermissionForAlias("fineLocation", call, "fineLocationCallback");
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            call.resolve(result("denied", true));
         } else {
             requestPermissionForAlias("backgroundLocation", call, "backgroundLocationCallback");
         }
@@ -50,10 +52,12 @@ public class LocationPermissionPlugin extends Plugin {
 
     @PermissionCallback
     private void fineLocationCallback(PluginCall call) {
-        if (getPermissionState("fineLocation") == PermissionState.GRANTED) {
-            requestPermissionForAlias("backgroundLocation", call, "backgroundLocationCallback");
-        } else {
+        if (getPermissionState("fineLocation") != PermissionState.GRANTED) {
+            call.resolve(result("denied", false));
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             call.resolve(result("denied", true));
+        } else {
+            requestPermissionForAlias("backgroundLocation", call, "backgroundLocationCallback");
         }
     }
 
@@ -65,11 +69,21 @@ public class LocationPermissionPlugin extends Plugin {
 
     @PluginMethod
     public void openSettings(PluginCall call) {
-        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-        intent.setData(Uri.parse("package:" + getContext().getPackageName()));
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        getContext().startActivity(intent);
-        call.resolve();
+        getActivity().runOnUiThread(() -> {
+            try {
+                Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+                getActivity().startActivity(intent);
+                call.resolve();
+            } catch (Exception appSettingsError) {
+                try {
+                    getActivity().startActivity(new Intent(Settings.ACTION_SETTINGS));
+                    call.resolve();
+                } catch (Exception settingsError) {
+                    call.reject("Unable to open Android settings", settingsError);
+                }
+            }
+        });
     }
 
     private JSObject result(String status, boolean needsSettings) {

@@ -1,9 +1,12 @@
 package com.wirraljobe.app;
 
+import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.util.Log;
 
 import androidx.core.content.ContextCompat;
@@ -31,6 +34,14 @@ public class DriverBootReceiver extends BroadcastReceiver {
 
         if (driverId.isEmpty() || driverToken.isEmpty()) {
             Log.d(TAG, "No saved driver session; skipping service restart");
+            return;
+        }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "Location permission missing; skipping service restart");
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "Background location permission missing; skipping service restart");
             return;
         }
 

@@ -100,11 +100,17 @@ export default function CustomerPage() {
 
   function addRegisterPlace(event) {
     event.preventDefault();
+    const lat = Number(placeForm.lat);
+    const lng = Number(placeForm.lng);
     if (!placeForm.label.trim() || !placeForm.address.trim()) {
       setError('Please enter a place name and address.');
       return;
     }
-    setRegisterPlaces(prev => [...prev, { ...placeForm, lat: Number(placeForm.lat) || 0, lng: Number(placeForm.lng) || 0 }]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      setError('Please enter valid latitude and longitude coordinates.');
+      return;
+    }
+    setRegisterPlaces(prev => [...prev, { ...placeForm, lat, lng }]);
     setPlaceForm({ label: '', address: '', lat: '', lng: '', type: 'pickup' });
     setError('');
   }
@@ -116,11 +122,13 @@ export default function CustomerPage() {
       const result = await api('customer/register', { name, phone, email, otp, pin });
       localStorage.setItem(SESSION_KEY, result.customerToken);
       registerPushToken(result.customerToken);
+      let failedPlaces = 0;
       for (const p of registerPlaces) {
-        await api('customer/places/add', { customerToken: result.customerToken, ...p });
+        try { await api('customer/places/add', { customerToken: result.customerToken, ...p }); }
+        catch { failedPlaces += 1; }
       }
       setCustomer(result.customer); resetForm();
-      setMessage('Your account is ready.');
+      setMessage(failedPlaces ? `Your account is ready. ${failedPlaces} saved place${failedPlaces === 1 ? '' : 's'} could not be added.` : 'Your account is ready.');
       await loadDashboard();
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
@@ -169,6 +177,18 @@ export default function CustomerPage() {
     setAuthStep('login'); resetForm();
   }
 
+  async function deleteAccount() {
+    if (!window.confirm('Permanently delete your Wirral Jobe account and saved places? Completed journey records will be anonymised where they must be retained.')) return;
+    setLoading(true); setError('');
+    try {
+      await api('customer/delete-account', { customerToken: token() });
+      localStorage.removeItem(SESSION_KEY); setCustomer(null); setJobs([]); setPlaces([]);
+      setAuthStep('login'); resetForm();
+      setMessage('Your account has been deleted.');
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
   function switchMode(next) {
     setAuthStep(next);
     setError(''); setMessage('');
@@ -176,8 +196,15 @@ export default function CustomerPage() {
 
   async function savePlace(event) {
     event.preventDefault(); setLoading(true); setError('');
+    const lat = Number(placeForm.lat);
+    const lng = Number(placeForm.lng);
+    if (!placeForm.label.trim() || !placeForm.address.trim() || !Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      setError('Please provide a place name, address and valid coordinates.');
+      setLoading(false);
+      return;
+    }
     try {
-      await api('customer/places/add', { customerToken: token(), ...placeForm });
+      await api('customer/places/add', { customerToken: token(), ...placeForm, lat, lng });
       setPlaceForm({ label: '', address: '', lat: '', lng: '', type: 'pickup' });
       setMessage('Place saved.');
       await loadDashboard();
@@ -211,7 +238,8 @@ export default function CustomerPage() {
 
   if (!customer) {
     return <div className="wj-shell"><div className="wj-frame wj-customer-auth">
-      <img src={logo} alt="The Wirral Jobe" className="wj-logo" />
+      <img src={logo} alt="The Wirral Jobe" className="wj-logo wj-logo-alive" />
+      <div className="wj-test-build">Test build 3.7</div>
       <div className="wj-customer-kicker">Customer portal</div>
       <h1 className="wj-title">
         {authStep === 'login' && 'Log in'}
@@ -358,5 +386,6 @@ export default function CustomerPage() {
       <div className="wj-saved-places">{places.length === 0 && <p className="wj-customer-empty">No saved places yet.</p>}{places.map(place => <article key={place.id}><span>{place.type === 'pickup' ? '↑' : '↓'}</span><div><strong>{place.label}</strong><small>{place.address}</small></div><button onClick={() => removePlace(place.id)} disabled={loading} aria-label={`Remove ${place.label}`}>×</button></article>)}</div>
       <form className="wj-place-form" onSubmit={savePlace}><div className="form-group"><label>Place name</label><input value={placeForm.label} onChange={e => setPlaceForm({ ...placeForm, label: e.target.value })} placeholder="e.g. Home" /></div><div className="form-group"><label>Address</label><input value={placeForm.address} onChange={e => setPlaceForm({ ...placeForm, address: e.target.value })} placeholder="Full address" /></div><div className="wj-place-coordinates"><div className="form-group"><label>Latitude</label><input type="number" step="any" value={placeForm.lat} onChange={e => setPlaceForm({ ...placeForm, lat: e.target.value })} placeholder="53.39" /></div><div className="form-group"><label>Longitude</label><input type="number" step="any" value={placeForm.lng} onChange={e => setPlaceForm({ ...placeForm, lng: e.target.value })} placeholder="-3.02" /></div></div><div className="wj-place-type"><button type="button" className={placeForm.type === 'pickup' ? 'active' : ''} onClick={() => setPlaceForm({ ...placeForm, type: 'pickup' })}>Pickup</button><button type="button" className={placeForm.type === 'dropoff' ? 'active' : ''} onClick={() => setPlaceForm({ ...placeForm, type: 'dropoff' })}>Drop-off</button></div><button className="btn btn-outline" disabled={loading}>Save place</button></form>
     </section>
+    <section className="wj-customer-section"><h2>Account</h2><p className="wj-customer-copy">You can permanently delete your account and saved places. Journey records that must be retained will be anonymised.</p><button type="button" className="btn btn-danger" onClick={deleteAccount} disabled={loading}>{loading ? 'Please wait…' : 'Delete account'}</button></section>
   </div></div>;
 }

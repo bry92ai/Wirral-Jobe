@@ -7,7 +7,7 @@ Wirral Jobe
 
 Short description (80 characters max)
 ---------------------------------------
-Book private hire, airport and local taxi rides across Wirral in seconds.
+Book local private hire and airport journeys across Wirral in seconds.
 
 Full description (4000 characters max)
 ----------------------------------------
@@ -19,9 +19,9 @@ For passengers:
 - Book instantly or schedule a future ride
 - Track your driver live from pickup to drop-off
 - Get SMS and push notifications when your driver is on the way, has arrived, and when your journey is complete
-- Pay the £1 booking fee securely with Square
+- Nothing to pay when booking; pay your driver at the end of the journey
 - Save your favourite pickup and drop-off places
-- See your journey history and rebook with one tap
+- View your current and previous journeys
 
 For drivers:
 - Log in with your driver ID and PIN

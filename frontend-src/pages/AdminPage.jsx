@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, apiGet, apiPatch } from '../lib/api.js';
 import { loadLeaflet, vehicleIcon, divIcon, pickupIconSvg, dropoffIconSvg } from '../lib/leaflet.js';
+import { getMapTiles } from '../lib/mapTiles.js';
 import { FLIGHTPATH_ZONES, getZoneName } from '../lib/zones.js';
 import logo from '../assets/logo.jpg';
 
@@ -31,8 +32,10 @@ export default function AdminPage() {
   const [jobDetail, setJobDetail] = useState(null);
   const [settleAmounts, setSettleAmounts] = useState({});
   const [smsTemplates, setSmsTemplates] = useState([]);
+  const [mapTheme, setMapTheme] = useState(localStorage.getItem('mapTheme') || 'dark');
   const mapRef = useRef(null);
   const mapObjRef = useRef(null);
+  const tileLayerRef = useRef(null);
   const LRef = useRef(null);
   const markersRef = useRef([]);
   const zoneLabelsRef = useRef([]);
@@ -65,7 +68,7 @@ export default function AdminPage() {
     abortRef.current = controller;
     try {
       const headers = { 'x-admin-token': token };
-      const [j, d, a, fo, al, b, t, sms, tpl] = await Promise.all([
+      const results = await Promise.allSettled([
         apiGet('/admin/jobs', headers, controller.signal),
         apiGet('/admin/drivers', headers, controller.signal),
         apiGet('/admin/driver-applications', headers, controller.signal),
@@ -77,16 +80,22 @@ export default function AdminPage() {
         apiGet('/admin/sms-templates', headers, controller.signal)
       ]);
       if (controller.signal.aborted) return;
-      setJobs(j.jobs);
-      setDrivers(d.drivers);
-      setApplications(a.applications || []);
-      setFutureOffers(fo.futureOffers || []);
-      setAuditLogs(al.logs || []);
-      setBids(b.bids || []);
-      setTariff(t.tariff || null);
-      setPendingSms(sms.messages || []);
-      setSmsTemplates(tpl.templates || []);
-      setError('');
+      const failures = results.filter(result => result.status === 'rejected');
+      const authFailure = failures.find(result => result.reason?.message?.includes('Admin not authenticated'));
+      if (authFailure) throw authFailure.reason;
+      if (results[0].status === 'rejected') throw results[0].reason;
+      if (results[1].status === 'rejected') throw results[1].reason;
+      const value = index => results[index].status === 'fulfilled' ? results[index].value : null;
+      setJobs(value(0).jobs || []);
+      setDrivers(value(1).drivers || []);
+      if (value(2)) setApplications(value(2).applications || []);
+      if (value(3)) setFutureOffers(value(3).futureOffers || []);
+      if (value(4)) setAuditLogs(value(4).logs || []);
+      if (value(5)) setBids(value(5).bids || []);
+      if (value(6)) setTariff(value(6).tariff || null);
+      if (value(7)) setPendingSms(value(7).messages || []);
+      if (value(8)) setSmsTemplates(value(8).templates || []);
+      setError(failures.length ? `${failures.length} admin section${failures.length === 1 ? '' : 's'} could not be refreshed.` : '');
     } catch (err) {
       if (err.name === 'AbortError') return;
       setError(err.message);
@@ -141,10 +150,8 @@ export default function AdminPage() {
     loadLeaflet().then(L => {
       LRef.current = L;
       const map = L.map(mapRef.current, { zoomControl: false }).setView([53.38, -3.03], 11);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
-        maxZoom: 19
-      }).addTo(map);
+      const tiles = getMapTiles(mapTheme);
+      tileLayerRef.current = L.tileLayer(tiles.url, tiles.options).addTo(map);
       mapObjRef.current = map;
 
       L.geoJSON(FLIGHTPATH_ZONES, {
@@ -178,7 +185,11 @@ export default function AdminPage() {
       LRef.current = null;
       setMapReady(false);
     };
-  }, []);
+  }, [token]);
+
+  useEffect(() => {
+    if (tileLayerRef.current) tileLayerRef.current.setUrl(getMapTiles(mapTheme).url);
+  }, [mapTheme]);
 
   useEffect(() => {
     if (!mapReady || !LRef.current || !mapObjRef.current) return;
@@ -399,6 +410,13 @@ export default function AdminPage() {
 
       <details className="wj-admin-section card" open={mapOpen} onToggle={e => { setMapOpen(e.target.open); setTimeout(() => { if (mapObjRef.current) mapObjRef.current.invalidateSize(); }, 60); }}>
         <summary className="wj-admin-section-title">Live map</summary>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => setMapTheme(theme => {
+            const next = theme === 'dark' ? 'light' : 'dark';
+            localStorage.setItem('mapTheme', next);
+            return next;
+          })}>{mapTheme === 'dark' ? 'Light map' : 'Dark map'}</button>
+        </div>
         <div ref={mapRef} className="wj-admin-map" />
         <p className="wj-admin-map-legend">
           Gold car/MPV = open job pickup · Green car/MPV = available driver · Red car/MPV = busy/offline driver

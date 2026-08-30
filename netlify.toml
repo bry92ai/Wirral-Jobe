@@ -3,10 +3,8 @@
   publish = "dist"
   functions = "netlify/functions"
 
-[build.environment]
-  GAS_URL = "https://script.google.com/macros/s/AKfycbztS6cUmeBdjabEiBPTJ4ilCLBETqy9a32Dsp477JESy4_HN9D_mr2-1CaN1v7x19cs/exec"
-# NOTE: The live GAS_URL for the Netlify function is set via the Netlify UI environment variable.
-#       Update it there as well after creating a new Apps Script deployment.
+# NOTE: Set GAS_URL and all production API keys through Netlify environment variables.
+#       Update GAS_URL after creating a new Apps Script deployment.
 
 [[headers]]
   for = "/index.html"

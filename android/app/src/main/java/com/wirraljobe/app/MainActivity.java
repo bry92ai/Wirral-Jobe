@@ -11,5 +11,6 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         JobOfferChannel.create(this);
         registerPlugin(DriverServicePlugin.class);
+        registerPlugin(LocationPermissionPlugin.class);
     }
 }

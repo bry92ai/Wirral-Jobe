@@ -603,6 +603,12 @@ select option { background: var(--surface); color: var(--cream); }
 .wj-track-meta small, .wj-track-driver span { color: var(--gold); font-size: 0.62rem; font-weight: 800; text-transform: uppercase; }
 .wj-track-meta strong, .wj-track-driver strong { margin-top: 0.2rem; color: var(--cream); font-size: 0.9rem; }
 .wj-track-driver small { margin-top: 0.18rem; color: var(--cream-dim); font-size: 0.7rem; }
+.wj-track-map-wrap { position: relative; margin-bottom: 0.9rem; overflow: hidden; border: 1.5px solid var(--border-strong); border-radius: 18px; box-shadow: 0 16px 35px rgba(0,0,0,0.42); }
+.wj-track-live-map { width: 100%; height: 360px; }
+.wj-track-map-caption { position: absolute; right: 12px; bottom: 12px; left: 12px; z-index: 500; padding: 0.65rem 0.8rem; border: 1px solid rgba(255,255,255,0.18); border-radius: 12px; background: rgba(5,5,5,0.88); backdrop-filter: blur(8px); }
+.wj-track-map-caption strong, .wj-track-map-caption span { display: block; }
+.wj-track-map-caption strong { color: var(--cream); font-size: 0.82rem; }
+.wj-track-map-caption span { color: var(--gold); font-size: 0.68rem; font-weight: 700; }
 .wj-track-progress { margin-top: 1rem; padding: 0.9rem; border-left: 1px solid var(--border-strong); }
 .wj-track-progress > div { display: flex; align-items: center; gap: 0.6rem; min-height: 34px; color: var(--muted); font-size: 0.7rem; font-weight: 800; text-transform: uppercase; }
 .wj-track-progress i { width: 10px; height: 10px; border: 1px solid var(--cream-dim); border-radius: 50%; }
@@ -642,6 +648,10 @@ select option { background: var(--surface); color: var(--cream); }
 
 .wj-customer-auth { background: radial-gradient(circle at 50% 0%, #17130a 0, #090909 32%, #050505 72%); }
 .wj-customer-auth .wj-logo { width: 190px; margin-top: 0.7rem; }
+.wj-logo-alive { animation: wj-logo-float 4.5s ease-in-out infinite; filter: drop-shadow(0 10px 22px rgba(244,191,27,0.12)); }
+.wj-test-build { margin: -0.45rem 0 0.55rem; color: var(--gold); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.08em; text-align: center; text-transform: uppercase; }
+@keyframes wj-logo-float { 0%, 100% { transform: translateY(0); filter: drop-shadow(0 10px 22px rgba(244,191,27,0.1)); } 50% { transform: translateY(-5px); filter: drop-shadow(0 14px 28px rgba(244,191,27,0.22)); } }
+@media (prefers-reduced-motion: reduce) { .wj-logo-alive { animation: none; } }
 .wj-customer-kicker { color: var(--gold); font-family: var(--font-display); font-size: 0.72rem; letter-spacing: 0.08em; text-align: center; text-transform: uppercase; }
 .wj-customer-auth .wj-title { margin-top: 0.55rem; font-size: 2.1rem; text-align: center; }
 .wj-customer-auth .wj-subtitle { text-align: center; }
@@ -681,6 +691,33 @@ select option { background: var(--surface); color: var(--cream); }
 .wj-place-form .form-group { margin-bottom: 0.65rem; }.wj-place-form input { padding: 0.7rem 0.8rem; font-size: 0.85rem; }
 .wj-place-coordinates { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }.wj-place-type { margin: 0.1rem 0 0.65rem; }
 .wj-driver-apply { max-width: 520px; }.wj-driver-apply .wj-subtitle { margin-bottom: 1rem; }.wj-file-name { display: block; margin-top: 0.45rem; color: var(--cream-dim); font-size: 0.72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.wj-driver-application { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; }.wj-driver-application .row { grid-column: 1 / -1; }
+
+.wj-navigation-taxi { width: 52px; height: 52px; display: grid; place-items: center; border: 3px solid #fff; border-radius: 50%; background: #171717; box-shadow: 0 0 0 5px rgba(244,191,27,0.24), 0 6px 16px rgba(0,0,0,0.6); }
+.wj-navigation-taxi-icon { width: 48px; height: 48px; display: grid; place-items: center; transition: transform 80ms linear; will-change: transform; }
+.wj-navigation-target { width: 24px; height: 24px; border-radius: 50% 50% 50% 0; background: var(--gold); border: 3px solid #fff; transform: rotate(-45deg); box-shadow: 0 3px 10px rgba(0,0,0,0.45); }
+.wj-active-job-panel { position: absolute; right: 12px; bottom: 72px; left: 12px; z-index: 1000; max-height: 56vh; overflow-y: auto; }
+.wj-active-job-card { padding: 0.9rem; border: 2px solid var(--gold); border-radius: 18px; background: rgba(10,10,10,0.96); box-shadow: 0 12px 32px rgba(0,0,0,0.5); }
+.wj-active-job-summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 0.75rem; }
+.wj-active-job-target { max-width: 62vw; margin-top: 0.4rem; overflow: hidden; color: var(--cream); font-size: 0.82rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.wj-active-job-metrics { flex-shrink: 0; text-align: right; }
+.wj-active-job-metrics span, .wj-active-job-metrics strong { display: block; }
+.wj-active-job-metrics span { color: var(--cream-dim); font-size: 0.68rem; }
+.wj-active-job-metrics strong { margin-top: 0.15rem; color: var(--gold); font-size: 1.2rem; }
+.wj-primary-job-action { width: 100%; min-height: 56px; font-family: var(--font-display); font-size: 1rem; letter-spacing: 0.02em; text-transform: uppercase; transition: background 0.15s, transform 0.15s; }
+.wj-primary-job-action.is-confirmed { background: var(--green); border-color: var(--green); color: #06130a; opacity: 1; }
+.wj-primary-pin-action { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 8px; }
+.wj-primary-pin-action input { min-width: 0; text-align: center; }
+.wj-job-details-toggle { width: 100%; margin-top: 0.65rem; padding: 0.35rem; border: 0; background: transparent; color: var(--cream-dim); font-size: 0.74rem; font-weight: 700; }
+.wj-job-details { padding-top: 0.65rem; border-top: 1px solid var(--border); }
+.wj-job-waiting { margin-bottom: 0.65rem; color: var(--cream-dim); font-size: 0.82rem; }
+.wj-job-waiting span { display: block; font-size: 0.7rem; }
+.wj-job-route-details > div { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 0.5rem; }
+.wj-job-route-details .wj-dot { margin-top: 5px; }
+.wj-job-route-details p { margin: 0; color: var(--cream); font-size: 0.8rem; }
+.wj-job-route-details small { display: block; color: var(--gold); font-size: 0.62rem; font-weight: 800; text-transform: uppercase; }
+.wj-job-secondary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 0.5rem; }
+.wj-job-secondary-grid .btn { text-align: center; }
+.wj-job-danger-actions .btn { border-color: rgba(239,68,68,0.6); color: #ff9d9d; }
 
 @media (max-width: 600px) {
   .app { padding: 0.5rem; }

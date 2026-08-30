@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.util.Log;
 
@@ -17,12 +18,14 @@ import com.google.firebase.messaging.RemoteMessage;
 public class WirralJobeMessagingService extends FirebaseMessagingService {
 
     private static final String TAG = "WirralJobeMessagingService";
-    private static final String CHANNEL_ID = "job_offers";
+    private static final String CHANNEL_ID = JobOfferChannel.CHANNEL_ID;
+    private static final String UPDATES_CHANNEL_ID = "job_updates";
     private static final int NOTIFICATION_ID_BASE = 2000;
 
     @Override
     public void onCreate() {
         super.onCreate();
+        JobOfferChannel.create(this);
         createNotificationChannel();
     }
 
@@ -31,6 +34,7 @@ public class WirralJobeMessagingService extends FirebaseMessagingService {
         super.onMessageReceived(message);
 
         if (message.getData() == null || !"job_offer".equals(message.getData().get("type"))) {
+            showUpdateNotification(message);
             return;
         }
 
@@ -76,19 +80,39 @@ public class WirralJobeMessagingService extends FirebaseMessagingService {
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationChannel channel = new NotificationChannel(
-            CHANNEL_ID,
-            "Job offers",
+            UPDATES_CHANNEL_ID,
+            "Job updates",
             NotificationManager.IMPORTANCE_HIGH
         );
-        channel.setDescription("Notifications for incoming job offers");
+        channel.setDescription("Booking and journey updates");
         channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager != null) manager.createNotificationChannel(channel);
     }
 
+    private void showUpdateNotification(RemoteMessage message) {
+        String title = message.getNotification() != null ? message.getNotification().getTitle() : message.getData().get("title");
+        String body = message.getNotification() != null ? message.getNotification().getBody() : message.getData().get("body");
+        if ((title == null || title.isEmpty()) && (body == null || body.isEmpty())) return;
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, message.getMessageId() != null ? message.getMessageId().hashCode() : (int) System.currentTimeMillis(), intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Notification notification = new NotificationCompat.Builder(this, UPDATES_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title != null ? title : "Wirral Jobe")
+            .setContentText(body != null ? body : "")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build();
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager != null) manager.notify(UPDATES_CHANNEL_ID, NOTIFICATION_ID_BASE + (message.getMessageId() != null ? message.getMessageId().hashCode() : (int) System.currentTimeMillis()), notification);
+    }
+
     private PendingIntent openAppPendingIntent(String jobId, String driverId, String acceptToken, String declineToken, String pickup, String dropoff, String fare, String apiUrl) {
         Intent intent = new Intent(this, MainActivity.class);
         intent.setAction("com.wirraljobe.app.action.SHOW_OFFER");
+        intent.setData(Uri.parse("https://wirraljobe.com/driver?offer=" + Uri.encode(jobId)));
         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         fillExtras(intent, jobId, driverId, acceptToken, declineToken, pickup, dropoff, fare, apiUrl);
         return PendingIntent.getActivity(this, jobId.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);

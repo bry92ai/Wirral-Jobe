@@ -11,7 +11,6 @@ import DriverApplyPage from './pages/DriverApplyPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import CustomerPage from './pages/CustomerPage.jsx';
 import DriverActionPage from './pages/DriverActionPage.jsx';
-import WalletPayPage from './pages/WalletPayPage.jsx';
 import PrivacyPage from './pages/PrivacyPage.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
@@ -26,20 +25,10 @@ export default function App() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
 
-    PushNotifications.requestPermissions().then(res => {
-      if (res.receive === 'granted') {
-        PushNotifications.register();
-      }
-    }).catch(err => console.error('Push permission error:', err));
-
-    LocalNotifications.createChannel({
-      id: 'job_offers',
-      name: 'Job Offers',
-      description: 'New job offer alerts and customer updates',
-      importance: 5,
-      visibility: 1,
-      vibration: true
-    }).catch(err => console.error('Create notification channel error:', err));
+    Promise.all([
+      LocalNotifications.createChannel({ id: 'job_offers_v2', name: 'Direct Job Offers', description: 'Urgent direct job offers', importance: 5, visibility: 1, vibration: true }),
+      LocalNotifications.createChannel({ id: 'job_updates', name: 'Job Availability', description: 'New bids, Pool bookings and available work', importance: 3, visibility: 1, vibration: true })
+    ]).catch(err => console.error('Create notification channel error:', err));
 
     PushNotifications.addListener('registration', token => {
       localStorage.setItem('fcmToken', token.value);
@@ -57,10 +46,12 @@ export default function App() {
     });
     PushNotifications.addListener('pushNotificationReceived', notification => {
       // Foreground push: mirror it as a local notification so the user still sees it.
+      window.dispatchEvent(new CustomEvent('wirral:push', { detail: notification.data || {} }));
+      if (notification.data?.type === 'job_offer') return;
       LocalNotifications.schedule({
         notifications: [{
-          id: Date.now(),
-          channelId: 'job_offers',
+          id: Math.floor(Date.now() % 2147483647),
+          channelId: notification.data?.type === 'job_offer' ? 'job_offers_v2' : 'job_updates',
           title: notification.title || 'Wirral Jobe',
           body: notification.body || '',
           extra: notification.data || {}
@@ -77,13 +68,16 @@ export default function App() {
       const route = action.notification?.extra?.route;
       if (route) navigate(route);
     });
+
+    PushNotifications.requestPermissions().then(res => {
+      if (res.receive === 'granted') PushNotifications.register();
+    }).catch(err => console.error('Push permission error:', err));
   }, [navigate]);
 
   return (
     <div className="app">
       <nav className="nav">
         <Link to="/">Book</Link>
-        <Link to="/customer">Customer</Link>
         <Link to="/driver">Driver</Link>
       </nav>
       <main>
@@ -97,7 +91,6 @@ export default function App() {
             <Route path="/driver/apply/:token" element={<DriverApplyPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/driver-action" element={<DriverActionPage />} />
-            <Route path="/wallet-pay" element={<WalletPayPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
           </Routes>
         </ErrorBoundary>

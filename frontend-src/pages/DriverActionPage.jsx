@@ -19,7 +19,7 @@ export default function DriverActionPage() {
       return;
     }
 
-    if (action !== 'accept' && action !== 'decline') {
+    if (!['accept', 'decline', 'pool-accept'].includes(action)) {
       setStatus('error');
       setMessage('This link is not valid.');
       return;
@@ -28,7 +28,7 @@ export default function DriverActionPage() {
     api('driver/secure-action', { jobId, driverId, action, token })
       .then(result => {
         setStatus('success');
-        setMessage(action === 'accept' ? 'You have accepted the job.' : 'You have declined the job.');
+        setMessage(action === 'decline' ? 'You have declined the job.' : 'You have accepted the job.');
       })
       .catch(err => {
         setStatus('error');

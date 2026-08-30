@@ -22,11 +22,12 @@ export async function requestBackgroundLocationPermission() {
   }
 }
 
-export function openAppSettings() {
+export async function openAppSettings() {
   if (!Capacitor.isNativePlatform()) return;
   try {
-    LocationPermission.openSettings();
+    await LocationPermission.openSettings();
   } catch (e) {
     console.warn('openAppSettings failed:', e);
+    throw e;
   }
 }

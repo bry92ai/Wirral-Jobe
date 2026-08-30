@@ -4,7 +4,7 @@ const DriverService = registerPlugin('DriverService');
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export async function startDriverService({ driverId, driverToken, status, jobId, fare } = {}) {
-  if (!Capacitor.isNativePlatform()) return;
+  if (!Capacitor.isNativePlatform()) return { ok: true };
   try {
     await DriverService.start({
       apiUrl: API_URL,
@@ -15,8 +15,10 @@ export async function startDriverService({ driverId, driverToken, status, jobId,
       fare: String(fare || '0')
     });
     console.log('Driver foreground service started');
+    return { ok: true };
   } catch (e) {
     console.warn('Failed to start driver service:', e);
+    return { ok: false, error: e?.message || String(e) };
   }
 }
 

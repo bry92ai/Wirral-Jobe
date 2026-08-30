@@ -4,12 +4,25 @@ import { api, apiGet } from '../lib/api.js';
 import { FLIGHTPATH_ZONES, findZone, getZoneName } from '../lib/zones.js';
 import { distanceMiles } from '../lib/geo.js';
 import { loadLeaflet, vehicleIcon, headingIcon, divIcon, pickupIconSvg, dropoffIconSvg, coinIcon, maneuverIconSvg } from '../lib/leaflet.js';
+import { getMapTiles } from '../lib/mapTiles.js';
 import { startDriverService, updateDriverService, stopDriverService } from '../lib/driverService.js';
-import { requestBackgroundLocationPermission, openAppSettings } from '../lib/locationPermission.js';
+import { checkBackgroundLocationPermission } from '../lib/locationPermission.js';
 import { Geolocation } from '@capacitor/geolocation';
 import { Capacitor } from '@capacitor/core';
-import DriverRouteLayer from '../components/DriverRouteLayer.jsx';
 import logo from '../assets/logo.jpg';
+
+const DriverNavigationMap = React.lazy(() => import('../components/DriverNavigationMap.jsx'));
+const API_BASE = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/+$/, '');
+
+async function fetchDrivingMetrics(originLat, originLng, destinationLat, destinationLng) {
+  const url = `${API_BASE}/api/directions?origin=${encodeURIComponent(`${originLat},${originLng}`)}&destination=${encodeURIComponent(`${destinationLat},${destinationLng}`)}`;
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok) throw new Error('Directions request failed');
+  const data = await response.json();
+  const leg = data.routes?.[0]?.legs?.[0];
+  if (!leg?.distance) throw new Error('No driving route found');
+  return { miles: Number(leg.distance.value) / 1609.344, durationText: leg.duration?.text || '' };
+}
 
 function playOfferSound() {
   try {
@@ -52,14 +65,13 @@ const MAP_CENTER_DEFAULT = { lat: 53.393, lng: -3.05 };
 
 function getZoneStyle(feature, currentZoneId, selectedZoneId) {
   const external = feature.properties.external;
-  const active = currentZoneId === feature.properties.zoneId;
   const selected = selectedZoneId === feature.properties.zoneId;
   return {
     color: external ? '#5b5647' : (selected ? '#fff3c4' : '#f4bf1b'),
-    weight: selected ? 4 : (active ? 3 : 1),
+    weight: selected ? 4 : 1,
     opacity: external ? 0.5 : 0.8,
-    fillColor: external ? '#5b5647' : (selected ? '#f4bf1b' : '#f4bf1b'),
-    fillOpacity: external ? 0.04 : (selected ? 0.3 : (active ? 0.22 : 0.06)),
+    fillColor: selected ? '#f4bf1b' : '#020617',
+    fillOpacity: external ? 0 : (selected ? 0.22 : 0.2),
     dashArray: external ? '4 4' : undefined
   };
 }
@@ -105,7 +117,8 @@ function DriverPageContent() {
   const [currentZoneId, setCurrentZoneId] = useState(null);
   const [heading, setHeading] = useState(null);
   const [openPanel, setOpenPanel] = useState(null);
-  const [jobCardExpanded, setJobCardExpanded] = useState(true);
+  const [jobCardExpanded, setJobCardExpanded] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState(null);
   const [bidBoard, setBidBoard] = useState([]);
   const [selectedBid, setSelectedBid] = useState(null);
   const [navigationTarget, setNavigationTarget] = useState(null);
@@ -120,6 +133,10 @@ function DriverPageContent() {
   const [mapMode, setMapMode] = useState('zone');
   const [routeInfo, setRouteInfo] = useState(null);
   const [bgLocationStatus, setBgLocationStatus] = useState('unknown');
+  const [locationNoticeDismissed, setLocationNoticeDismissed] = useState(false);
+  const [headerExpanded, setHeaderExpanded] = useState(false);
+  const [mapTheme, setMapTheme] = useState(localStorage.getItem('mapTheme') || 'dark');
+  const [offerRoutes, setOfferRoutes] = useState({});
 
   const mapRef = useRef(null);
   const LRef = useRef(null);
@@ -153,12 +170,13 @@ function DriverPageContent() {
         setDriverId(storedId);
         setDriverName(localStorage.getItem('driverName') || '');
         setLoggedIn(true);
-        requestBackgroundLocationPermission().then(({ backgroundLocation }) => setBgLocationStatus(backgroundLocation));
-        startDriverService({
+        checkBackgroundLocationPermission().then(({ backgroundLocation }) => setBgLocationStatus(backgroundLocation));
+        const service = await startDriverService({
           driverId: storedId,
           driverToken: localStorage.getItem('driverToken') || '',
           status: data?.status || 'AVAILABLE'
         });
+        if (!service.ok) setLocationError('Background driver tracking could not start. Check location permission and restart the app.');
       } catch {
         localStorage.removeItem('driverId');
         localStorage.removeItem('driverName');
@@ -167,6 +185,16 @@ function DriverPageContent() {
     }
     restore();
   }, []);
+
+  useEffect(() => {
+    if (!loggedIn || !Capacitor.isNativePlatform()) return;
+    const refreshPermission = () => checkBackgroundLocationPermission().then(({ backgroundLocation }) => {
+      setBgLocationStatus(backgroundLocation);
+      if (backgroundLocation === 'granted') setLocationNoticeDismissed(false);
+    });
+    window.addEventListener('focus', refreshPermission);
+    return () => window.removeEventListener('focus', refreshPermission);
+  }, [loggedIn]);
 
   useEffect(() => {
     function onErr(msg, url, line, col, err) {
@@ -181,7 +209,14 @@ function DriverPageContent() {
     return () => { window.onerror = null; window.onunhandledrejection = null; };
   }, []);
 
-  const activeJob = useMemo(() => (jobs || []).find(j => !['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(j.status)), [jobs]);
+  const activeJob = useMemo(() => (jobs || []).find(j => ['ASSIGNED', 'ON_WAY', 'ARRIVED', 'POB'].includes(j.status)), [jobs]);
+
+  useEffect(() => {
+    if (activeJob) {
+      setMapMode('route');
+      setFollowMe(true);
+    }
+  }, [activeJob?.jobId]);
 
   const liveMeter = useMemo(() => {
     if (!activeJob || activeJob.status !== 'POB') return null;
@@ -287,12 +322,13 @@ function DriverPageContent() {
       }
       setDriverName(res.name);
       setLoggedIn(true);
-      requestBackgroundLocationPermission().then(({ backgroundLocation }) => setBgLocationStatus(backgroundLocation));
-      startDriverService({
+      checkBackgroundLocationPermission().then(({ backgroundLocation }) => setBgLocationStatus(backgroundLocation));
+      const service = await startDriverService({
         driverId: res.driverId,
         driverToken: res.token,
         status: res.status || 'AVAILABLE'
       });
+      if (!service.ok) setLocationError('Background driver tracking could not start. Check location permission and restart the app.');
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   }
@@ -316,13 +352,11 @@ function DriverPageContent() {
     setError('');
     try {
       await api('driver/availability', { status }, driverAuth());
-      if (status === 'AVAILABLE' || status === 'BREAK') {
-        const token = localStorage.getItem('driverToken') || '';
-        if (status === 'AVAILABLE') {
-          startDriverService({ driverId, driverToken: token, status });
-        } else {
-          stopDriverService();
-        }
+      const token = localStorage.getItem('driverToken') || '';
+      if (status === 'AVAILABLE') {
+        startDriverService({ driverId, driverToken: token, status });
+      } else {
+        stopDriverService();
       }
       await loadProfile();
     } catch (err) {
@@ -401,6 +435,8 @@ function DriverPageContent() {
     if (!amount || Number(amount) <= 0) return setError('This job does not have a valid fare.');
     setLoading(true); setError('');
     try {
+      setBidBoard(current => current.map(j => j.jobId === jobId ? { ...j, myBid: { amount: Number(amount) } } : j));
+      setMyBids(current => [...current, { jobId, amount: Number(amount), status: 'pending' }]);
       await api(`driver/bid-board/${jobId}/bid`, { amount: Number(amount) }, driverAuth());
       await Promise.all([loadBidBoard(), loadMyBids()]);
     } catch (err) { setError(err.message); }
@@ -436,6 +472,7 @@ function DriverPageContent() {
 
   function recenterMap() {
     setFollowMe(true);
+    if (mapMode === 'route') return;
     const map = mapObjRef.current;
     if (map && myLocation) map.panTo([myLocation.lat, myLocation.lng]);
   }
@@ -486,6 +523,11 @@ function DriverPageContent() {
   async function acceptOffer(jobId) {
     setLoading(true);
     try {
+      const accepted = offers.find(o => o.jobId === jobId);
+      if (accepted) {
+        setOffers(current => current.filter(o => o.jobId !== jobId));
+        setJobs(current => [...current, { ...accepted, status: 'ASSIGNED' }]);
+      }
       await api(`driver/offers/${jobId}/accept`, {}, driverAuth());
       await Promise.all([loadOffers(), loadJobs()]);
     } catch (err) { setError(err.message); }
@@ -493,19 +535,27 @@ function DriverPageContent() {
   }
 
   async function declineOffer(jobId) {
+    setOffers(current => current.filter(o => o.jobId !== jobId));
     try { await api(`driver/offers/${jobId}/decline`, {}, driverAuth()); loadOffers(); }
     catch (err) { setError(err.message); }
   }
 
   async function setStatus(jobId, status) {
-    setLoading(true);
+    if (pendingStatus) return;
+    const originalStatus = jobs.find(job => job.jobId === jobId)?.status;
+    setError('');
+    setPendingStatus(status);
+    setJobs(current => current.map(job => job.jobId === jobId ? { ...job, status } : job));
     try {
       await api(`driver/jobs/${jobId}/status`, { status }, driverAuth());
-      await loadJobs(); await loadProfile();
       updateDriverService({ status, jobId, fare: activeJob?.fare || 0 });
+      await Promise.all([loadJobs(), loadProfile()]);
+    } catch (err) {
+      setJobs(current => current.map(job => job.jobId === jobId && job.status === status ? { ...job, status: originalStatus } : job));
+      setError(`Could not update the job. ${err.message}`);
+    } finally {
+      setPendingStatus(null);
     }
-    catch (err) { setError(err.message); }
-    finally { setLoading(false); }
   }
 
   async function verifyPin(jobId, pin) {
@@ -542,12 +592,11 @@ function DriverPageContent() {
     loadLeaflet().then(L => {
       if (!mounted) return;
       LRef.current = L;
+      const hasLocation = !!myLocation;
       const start = myLocation || MAP_CENTER_DEFAULT;
-      const map = L.map(mapRef.current, { zoomControl: false }).setView([start.lat, start.lng], 14);
-      tileLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap contributors, &copy; CARTO',
-        maxZoom: 19
-      }).addTo(map);
+      const map = L.map(mapRef.current, { zoomControl: false, doubleClickZoom: false }).setView([start.lat, start.lng], hasLocation ? 16 : 14);
+      const tiles = getMapTiles(mapTheme);
+      tileLayerRef.current = L.tileLayer(tiles.url, tiles.options).addTo(map);
       mapObjRef.current = map;
 
       geoJsonLayerRef.current = L.geoJSON(FLIGHTPATH_ZONES, {
@@ -591,13 +640,36 @@ function DriverPageContent() {
         });
 
       map.on('zoomend', showLabels);
+      map.on('zoomstart', event => { if (event.originalEvent) setFollowMe(false); });
+      map.on('dblclick', event => {
+        setFollowMe(false);
+        map.setView(event.latlng, Math.min(map.getZoom() + 1, map.getMaxZoom()), { animate: true });
+      });
       map.on('dragstart', () => setFollowMe(false));
+      map.getContainer().addEventListener('touchstart', event => { if (event.touches.length > 1) setFollowMe(false); }, { passive: true });
       const wirralBoundsLayer = L.geoJSON(FLIGHTPATH_ZONES, { filter: f => !f.properties.external });
-      map.fitBounds(wirralBoundsLayer.getBounds(), { padding: [40, 40] });
+      if (hasLocation) {
+        map.setView([myLocation.lat, myLocation.lng], 16, { animate: false });
+      } else {
+        map.fitBounds(wirralBoundsLayer.getBounds(), { padding: [40, 40] });
+      }
       setTimeout(showLabels, 0);
       setMapReady(true);
     }).catch(err => setError('Map failed: ' + err.message));
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+      setMapReady(false);
+      mapObjRef.current?.remove();
+      mapObjRef.current = null;
+      tileLayerRef.current = null;
+      selfMarkerRef.current = null;
+      geoJsonLayerRef.current = null;
+      zoneLabelsRef.current = [];
+      offerMarkersRef.current = [];
+      otherDriverMarkersRef.current = [];
+      jobMarkersRef.current = [];
+      bidMarkersRef.current = [];
+    };
   }, [loggedIn]);
 
   useEffect(() => {
@@ -637,41 +709,25 @@ function DriverPageContent() {
     const map = mapObjRef.current;
     const inRouteMode = mapMode === 'route';
     try {
-      if (inRouteMode) {
-        map.dragging.disable();
-        map.touchZoom.disable();
-        map.scrollWheelZoom.disable();
-        map.doubleClickZoom.disable();
-        map.boxZoom.disable();
-        if (map.keyboard) map.keyboard.disable();
-      } else {
-        map.dragging.enable();
-        map.touchZoom.enable();
-        map.scrollWheelZoom.enable();
-        map.doubleClickZoom.enable();
-        map.boxZoom.enable();
-        if (map.keyboard) map.keyboard.enable();
-      }
+      map.dragging.enable();
+      map.touchZoom.enable();
+      map.scrollWheelZoom.enable();
+      map.doubleClickZoom.disable();
+      map.boxZoom.enable();
+      if (map.keyboard) map.keyboard.enable();
     } catch (e) { console.warn(e); }
+    // Keep the selected map theme in both zone and route modes.
     if (tileLayerRef.current) {
-      // Use a light, label-rich basemap in route mode so road names are easy to read.
-      tileLayerRef.current.setUrl(inRouteMode
-        ? 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
-        : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-      );
+      tileLayerRef.current.setUrl(getMapTiles(mapTheme).url);
+      tileLayerRef.current.setOpacity(inRouteMode ? 1 : (mapTheme === 'dark' ? 0.04 : 0.07));
     }
-  }, [mapReady, mapMode]);
+  }, [mapReady, mapMode, mapTheme]);
 
   useEffect(() => {
-    if (!mapReady || !mapObjRef.current || !myLocation) return;
+    if (!mapReady || !mapObjRef.current || mapMode !== 'zone' || !myLocation) return;
     const map = mapObjRef.current;
-    if (mapMode === 'route') {
-      if (map.getZoom() < 18) map.setZoom(18);
-      map.panTo([myLocation.lat, myLocation.lng]);
-    } else {
-      if (map.getZoom() > 16) map.setZoom(14);
-    }
-  }, [mapMode, myLocation, heading, mapReady]);
+    if (followMe) map.setView([myLocation.lat, myLocation.lng], Math.max(map.getZoom(), 15), { animate: true });
+  }, [mapMode, mapReady, myLocation, followMe]);
 
   useEffect(() => {
     if (!mapReady || !geoJsonLayerRef.current) return;
@@ -752,8 +808,24 @@ function DriverPageContent() {
   useEffect(() => {
     if (!loggedIn) return;
     let cancelled = false;
+    const refreshOffers = () => { if (!cancelled) loadOffers(); };
+    refreshOffers();
+    const id = setInterval(refreshOffers, 1500);
+    window.addEventListener('wirral:push', refreshOffers);
+    document.addEventListener('visibilitychange', refreshOffers);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener('wirral:push', refreshOffers);
+      document.removeEventListener('visibilitychange', refreshOffers);
+    };
+  }, [loggedIn, driverId]);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    let cancelled = false;
     loadDashboard();
-    const id = setInterval(() => { if (!cancelled) loadDashboard(); }, 15000);
+    const id = setInterval(() => { if (!cancelled) loadDashboard(); }, 5000);
     return () => { cancelled = true; clearInterval(id); };
   }, [loggedIn, driverId]);
 
@@ -782,13 +854,34 @@ function DriverPageContent() {
     if (!bidBoard.find(j => j.jobId === selectedBid.jobId)) setSelectedBid(null);
   }, [bidBoard, selectedBid]);
 
-  const previousOfferCountRef = useRef(0);
+  const seenOfferIdsRef = useRef(new Set());
   useEffect(() => {
-    if (offers.length > 0 && previousOfferCountRef.current === 0) {
+    const incoming = [...offers, ...futureOffers];
+    const unseen = incoming.filter(offer => !seenOfferIdsRef.current.has(offer.jobId));
+    incoming.forEach(offer => seenOfferIdsRef.current.add(offer.jobId));
+    if (unseen.length > 0) {
       playOfferSound();
+      if (unseen.some(offer => futureOffers.some(future => future.jobId === offer.jobId))) setOpenPanel('future');
     }
-    previousOfferCountRef.current = offers.length;
-  }, [offers]);
+  }, [offers, futureOffers]);
+
+  useEffect(() => {
+    if (!myLocation) return;
+    const candidates = [...offers, ...futureOffers, ...bidBoard, ...futureBookings].filter((offer, index, all) => all.findIndex(item => item.jobId === offer.jobId) === index);
+    if (candidates.length === 0) return;
+    let cancelled = false;
+    Promise.all(candidates.map(async offer => {
+      try {
+        const route = await fetchDrivingMetrics(myLocation.lat, myLocation.lng, offer.pickupLat, offer.pickupLng);
+        return [offer.jobId, route];
+      } catch {
+        return [offer.jobId, null];
+      }
+    })).then(entries => {
+      if (!cancelled) setOfferRoutes(Object.fromEntries(entries));
+    });
+    return () => { cancelled = true; };
+  }, [offers, futureOffers, bidBoard, futureBookings, myLocation?.lat, myLocation?.lng]);
 
   useEffect(() => {
     if (!loggedIn || !navigator.geolocation) return;
@@ -914,7 +1007,7 @@ function DriverPageContent() {
 
     refreshLocationRef.current = refreshLocation;
     refreshLocation();
-    const interval = setInterval(refreshLocation, 10000);
+    const interval = setInterval(refreshLocation, 5000);
     const fallbackTimeout = setTimeout(() => {
       if (!mounted || currentZoneIdRef.current) return;
       const profileZone = profileRef.current?.zone;
@@ -934,7 +1027,8 @@ function DriverPageContent() {
     return (
       <div className="wj-shell">
         <div className="wj-frame" style={{ maxWidth: 400 }}>
-          <img src={logo} alt="The Wirral Jobe" className="wj-logo" />
+          <img src={logo} alt="The Wirral Jobe" className="wj-logo wj-logo-alive" />
+          <div className="wj-test-build">Test build 3.7</div>
           <p className="wj-tagline" style={{ marginBottom: '1.25rem' }}>Driver portal — log in to start receiving jobs.</p>
           <form onSubmit={login}>
             <div className="form-group">
@@ -956,53 +1050,45 @@ function DriverPageContent() {
 
   return (
     <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-      <style>{`
-        .route-mode-map .custom-marker:not(.self-marker) > div {
-          transform: rotate(var(--map-heading, 0deg)) !important;
-          transform-origin: center center !important;
-        }
-      `}</style>
-      <div style={{ position: 'absolute', top: 12, left: 12, right: 12, zIndex: 1000 }} className="wj-driver-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <img src={logo} alt="" className="logo-badge" />
-          <div className="name-block">
-            <div className="name">{driverName || driverId}</div>
-            <div className="sub">{profile ? `${getZoneName(profile.zone)} · Reliability ${Math.round(profile.reliabilityScore || 100)}%` : driverId}</div>
-            {profile && (
+      <div style={{ position: 'absolute', top: 12, left: 12, right: headerExpanded ? 12 : 'auto', zIndex: 1000, maxWidth: headerExpanded ? 'none' : 'calc(100% - 150px)' }} className="wj-driver-header">
+        <button type="button" onClick={() => setHeaderExpanded(value => !value)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 0, border: 0, background: 'transparent', color: 'inherit', textAlign: 'left', minWidth: 0 }} aria-expanded={headerExpanded} aria-label={headerExpanded ? 'Collapse driver details' : 'Expand driver details'}>
+          <img src={logo} alt="The Wirral Jobe" className="logo-badge" style={!headerExpanded ? { width: 34, height: 34 } : undefined} />
+          <div className="name-block" style={{ minWidth: 0 }}>
+            <div className="name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{driverName || driverId}</div>
+            <div className="sub" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{profile ? `${getZoneName(profile.zone)} · ${Math.round(profile.reliabilityScore || 100)}% reliable` : driverId}</div>
+            {headerExpanded && profile && (
               <div className="sub" style={{ fontSize: '0.7rem', color: 'var(--cream-dim)', marginTop: 2 }}>
-                Settle balance {formatCurrency(profile.settleBalance)} · Weekly cap {formatCurrency(profile.weeklySettleCap || 0)} (left {formatCurrency(profile.remainingSettleCap || 0)})
+                Settle {formatCurrency(profile.settleBalance)} · Weekly cap left {formatCurrency(profile.remainingSettleCap || 0)}
               </div>
             )}
           </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className={`wj-pill ${locationOk ? 'wj-pill-green' : 'wj-pill-red'}`}
-            onClick={!locationOk ? requestLocation : undefined}
-            style={{ cursor: locationOk ? 'default' : 'pointer' }}
-            title={locationOk ? 'Location active' : 'Tap to enable location'}
-          >
-            <span className={`wj-dot ${locationOk ? 'wj-dot-green' : 'wj-dot-red'}`} />
-            {locationOk ? 'Loc on' : 'Loc off'}
-          </button>
-          <button className="btn btn-outline btn-sm" onClick={() => setAvailability('AVAILABLE')} disabled={loading || profile?.status === 'AVAILABLE'}>Available</button>
-          <button className="btn btn-outline btn-sm" onClick={() => setAvailability('BREAK')} disabled={loading || profile?.status === 'BREAK'}>Break</button>
-          <button className="btn btn-outline btn-sm" onClick={logout} disabled={loading}>Log out</button>
-        </div>
+          <span style={{ color: 'var(--gold)', fontSize: '1rem', transform: headerExpanded ? 'rotate(180deg)' : 'none' }}>⌄</span>
+        </button>
+        {headerExpanded && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            <button type="button" className={`wj-pill ${locationOk ? 'wj-pill-green' : 'wj-pill-red'}`} onClick={!locationOk ? requestLocation : undefined} style={{ cursor: locationOk ? 'default' : 'pointer' }} title={locationOk ? 'Location active' : 'Tap to enable location'}>
+              <span className={`wj-dot ${locationOk ? 'wj-dot-green' : 'wj-dot-red'}`} />
+              {locationOk ? 'Location on' : 'Location off'}
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={() => setAvailability('AVAILABLE')} disabled={loading || profile?.status === 'AVAILABLE'}>Available</button>
+            <button className="btn btn-outline btn-sm" onClick={() => setAvailability('BREAK')} disabled={loading || profile?.status === 'BREAK'}>Break</button>
+            <button className="btn btn-outline btn-sm" onClick={() => setAvailability('OFFLINE')} disabled={loading || profile?.status === 'OFFLINE'}>Offline</button>
+            <button className="btn btn-outline btn-sm" onClick={logout} disabled={loading}>Log out</button>
+          </div>
+        )}
       </div>
 
-      {Capacitor.isNativePlatform() && bgLocationStatus === 'denied' && (
-        <div style={{ position: 'absolute', top: 76, left: 12, right: 12, zIndex: 1001 }}>
-          <div className="card" style={{ padding: '0.65rem 0.9rem', borderRadius: 12, border: '1.5px solid var(--gold)', background: 'rgba(10,10,10,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--cream)' }}>Enable "Allow all the time" location so we can track jobs in the background.</span>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => openAppSettings()}>Open settings</button>
+      {Capacitor.isNativePlatform() && bgLocationStatus === 'denied' && !locationNoticeDismissed && (
+        <div style={{ position: 'absolute', top: headerExpanded ? 132 : 64, left: 12, right: 12, zIndex: 1200 }}>
+          <div className="card" style={{ padding: '0.8rem 0.9rem', borderRadius: 12, border: '1.5px solid var(--gold)', background: 'rgba(10,10,10,0.97)', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'start', gap: 10 }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--cream)', lineHeight: 1.4 }}>Android requires “Allow all the time” to be selected in app settings. This lets Wirral Jobe offer nearby jobs and provide live arrival updates while you are logged in, even when the app is closed.</span>
+            <button type="button" onClick={() => setLocationNoticeDismissed(true)} aria-label="Dismiss location message" style={{ border: 0, background: 'transparent', color: 'var(--cream)', fontSize: '1.2rem', padding: 0 }}>×</button>
           </div>
         </div>
       )}
 
       {locationError && (
-        <div style={{ position: 'absolute', top: Capacitor.isNativePlatform() && bgLocationStatus === 'denied' ? 140 : 76, left: 12, right: 12, zIndex: 1000 }}>
+        <div style={{ position: 'absolute', top: Capacitor.isNativePlatform() && bgLocationStatus === 'denied' && !locationNoticeDismissed ? (headerExpanded ? 270 : 200) : (headerExpanded ? 132 : 64), left: 12, right: 12, zIndex: 1100 }}>
           <p className="error" style={{ margin: 0, padding: '0.6rem 0.9rem', borderRadius: 10, background: 'var(--surface)', border: '1.5px solid rgba(239,68,68,0.4)' }}>{locationError}</p>
         </div>
       )}
@@ -1013,60 +1099,47 @@ function DriverPageContent() {
         </div>
       )}
 
-      <div className={mapMode === 'route' ? 'route-mode-map' : ''} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        <div
-          ref={mapRef}
-          style={{
-            position: 'absolute',
-            top: '-25%',
-            left: '-25%',
-            width: '150%',
-            height: '150%',
-            transform: `rotate(${mapMode === 'route' && heading != null ? -heading : 0}deg)`,
-            transformOrigin: 'center center',
-            transition: 'transform 0.25s linear',
-            '--map-heading': mapMode === 'route' && heading != null ? `${heading}deg` : '0deg'
-          }}
-        />
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <div ref={mapRef} style={{ position: 'absolute', inset: 0, opacity: mapMode === 'zone' ? 1 : 0, pointerEvents: mapMode === 'zone' ? 'auto' : 'none' }} />
+        {mapMode === 'route' && (
+          <React.Suspense fallback={<div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: 'var(--bg)', color: 'var(--cream)' }}>Loading navigation…</div>}>
+            <DriverNavigationMap
+              myLocation={myLocation}
+              heading={heading}
+              activeJob={activeJob}
+              theme={mapTheme}
+              follow={followMe}
+              onFollowChange={setFollowMe}
+              onRouteInfo={setRouteInfo}
+            />
+          </React.Suspense>
+        )}
       </div>
-      {mapReady && (
-        <DriverRouteLayer
-          map={mapObjRef.current}
-          L={LRef.current}
-          myLocation={myLocation}
-          activeJob={activeJob}
-          visible={mapMode === 'route'}
-          onRouteInfo={setRouteInfo}
-          fitMap={false}
-        />
-      )}
 
       {loggedIn && (
-        <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 1100 }}>
+        <div style={{ position: 'absolute', top: headerExpanded ? 132 : 12, right: 12, zIndex: 1100, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+          <div role="group" aria-label="Map view" style={{ display: 'flex', padding: 3, borderRadius: 999, border: '1.5px solid var(--border-strong)', background: mapTheme === 'dark' ? 'rgba(10,10,10,0.9)' : 'rgba(255,255,255,0.95)', boxShadow: '0 4px 14px rgba(0,0,0,0.3)' }}>
+            <button type="button" aria-pressed={mapMode === 'zone'} onClick={() => setMapMode('zone')} style={{ border: 0, borderRadius: 999, padding: '0.42rem 0.75rem', background: mapMode === 'zone' ? 'var(--gold)' : 'transparent', color: mapMode === 'zone' ? '#050505' : (mapTheme === 'dark' ? 'var(--cream)' : '#172033'), fontWeight: 800, fontSize: '0.75rem' }}>Zones</button>
+            <button type="button" aria-pressed={mapMode === 'route'} onClick={() => { setFollowMe(true); setMapMode('route'); }} style={{ border: 0, borderRadius: 999, padding: '0.42rem 0.75rem', background: mapMode === 'route' ? 'var(--gold)' : 'transparent', color: mapMode === 'route' ? '#050505' : (mapTheme === 'dark' ? 'var(--cream)' : '#172033'), fontWeight: 800, fontSize: '0.75rem' }}>Route</button>
+          </div>
           <button
             type="button"
-            onClick={() => setMapMode(m => m === 'route' ? 'zone' : 'route')}
             className="btn btn-outline btn-sm"
-            style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(10,10,10,0.85)' }}
+            onClick={() => setMapTheme(theme => {
+              const next = theme === 'dark' ? 'light' : 'dark';
+              localStorage.setItem('mapTheme', next);
+              return next;
+            })}
+            style={{ background: mapTheme === 'dark' ? 'rgba(10,10,10,0.88)' : 'rgba(255,255,255,0.94)', color: mapTheme === 'dark' ? 'var(--cream)' : '#172033' }}
           >
-            {mapMode === 'route' ? (
-              <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
-                Zonal view
-              </>
-            ) : (
-              <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
-                Route view
-              </>
-            )}
+            {mapTheme === 'dark' ? 'Light map' : 'Dark map'}
           </button>
         </div>
       )}
 
       {mapMode === 'route' && routeInfo && (
         <>
-          <div style={{ position: 'absolute', top: 12, left: 12, right: 90, zIndex: 1000 }}>
+          <div style={{ position: 'absolute', top: 72, left: 12, right: 90, zIndex: 1000 }}>
             <div className="card" style={{ padding: '1rem 1.1rem', borderRadius: 18, border: '1.5px solid var(--gold)', background: 'rgba(10,10,10,0.95)', display: 'flex', alignItems: 'center', gap: 14 }}>
               <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--gold)', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} dangerouslySetInnerHTML={{ __html: maneuverIconSvg(routeInfo.steps?.[0]?.maneuver, 38) }} />
               <div style={{ minWidth: 0, flex: 1 }}>
@@ -1077,7 +1150,7 @@ function DriverPageContent() {
             </div>
           </div>
 
-          <div style={{ position: 'absolute', bottom: 84, left: 12, right: 12, zIndex: 1000 }}>
+          <div style={{ position: 'absolute', bottom: 84, left: 12, right: 12, zIndex: 1000, display: activeJob ? 'none' : 'block' }}>
             <div className="card" style={{ padding: '0.75rem 1rem', borderRadius: 16, border: '1.5px solid var(--border-strong)', background: 'rgba(10,10,10,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ textAlign: 'center', flex: 1 }}>
                 <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 700, textTransform: 'uppercase' }}>Arrival</div>
@@ -1150,8 +1223,8 @@ function DriverPageContent() {
             const secondsLeft = Math.max(0, Math.ceil((offer.expiresAt - now) / 1000));
             const pickupZone = findZone(offer.pickupLat, offer.pickupLng);
             const dropoffZone = findZone(offer.dropoffLat, offer.dropoffLng);
-            const runningMiles = myLocation ? distanceMiles(myLocation.lat, myLocation.lng, offer.pickupLat, offer.pickupLng) : null;
-            const fareMiles = distanceMiles(offer.pickupLat, offer.pickupLng, offer.dropoffLat, offer.dropoffLng);
+            const runningRoute = offerRoutes[offer.jobId];
+            const fareMiles = Number(offer.miles);
             return (
               <div key={offer.jobId} className="card" style={{ pointerEvents: 'auto', border: '2px solid var(--gold)', borderRadius: 18, padding: 0, overflow: 'hidden', background: 'linear-gradient(135deg, #15130b, #090909)', boxShadow: '0 10px 30px rgba(0,0,0,0.45)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(244,191,27,0.12)', borderBottom: '1.5px solid var(--gold)' }}>
@@ -1172,13 +1245,13 @@ function DriverPageContent() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: '1rem' }}>
                     <div style={{ padding: '0.65rem', border: '1.5px solid var(--border-strong)', borderRadius: 12, background: 'rgba(0,0,0,0.25)' }}>
                       <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Running distance</div>
-                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.15rem', color: 'var(--cream)', marginTop: 4 }}>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</div>
-                      <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', marginTop: 2 }}>To pickup</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.15rem', color: 'var(--cream)', marginTop: 4 }}>{runningRoute ? `${runningRoute.miles.toFixed(1)} mi` : 'Calculating…'}</div>
+                      <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', marginTop: 2 }}>{runningRoute?.durationText || 'Road route to pickup'}</div>
                     </div>
                     <div style={{ padding: '0.65rem', border: '1.5px solid var(--border-strong)', borderRadius: 12, background: 'rgba(0,0,0,0.25)' }}>
                       <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Fare distance</div>
-                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.15rem', color: 'var(--cream)', marginTop: 4 }}>{fareMiles != null ? `${fareMiles.toFixed(1)} mi` : '—'}</div>
-                      <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', marginTop: 2 }}>Pickup to drop-off</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.15rem', color: 'var(--cream)', marginTop: 4 }}>{Number.isFinite(fareMiles) ? `${fareMiles.toFixed(1)} mi` : '—'}</div>
+                      <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', marginTop: 2 }}>Road route, pickup to drop-off</div>
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '0.75rem' }}>
@@ -1219,79 +1292,57 @@ function DriverPageContent() {
       )}
 
       {activeJob && (
-        <div style={{ position: 'absolute', bottom: 72, left: 12, right: 12, zIndex: 1000, maxHeight: '55vh', overflowY: 'auto' }}>
-          <div className="card" style={{ padding: '1rem', borderRadius: 18, border: '2px solid var(--gold)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <span className={`badge status-${activeJob.status}`}>{STATUS_LABELS[activeJob.status] || activeJob.status}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontWeight: 800, fontSize: '1.2rem' }}>{formatCurrency(activeJob.fare)}</span>
-                <button type="button" onClick={() => setJobCardExpanded(v => !v)} className="btn btn-outline btn-sm" style={{ padding: '0.25rem 0.6rem' }}>{jobCardExpanded ? 'Hide' : 'Show'}</button>
+        <div className="wj-active-job-panel">
+          <div className="card wj-active-job-card">
+            <div className="wj-active-job-summary">
+              <div>
+                <span className={`badge status-${activeJob.status}`}>{STATUS_LABELS[activeJob.status] || activeJob.status}</span>
+                <div className="wj-active-job-target">{['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? activeJob.pickupAddress : activeJob.dropoffAddress}</div>
+              </div>
+              <div className="wj-active-job-metrics">
+                {routeInfo && <span>{routeInfo.distanceText} · {routeInfo.durationText}</span>}
+                <strong>{liveMeter ? formatCurrency(liveMeter.fare) : formatCurrency(activeJob.fare)}</strong>
               </div>
             </div>
+
+            {activeJob.status === 'ARRIVED' ? (
+              <div className="wj-primary-pin-action">
+                <input inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={pinInput} onChange={e => setPinInput(e.target.value)} placeholder="Passenger PIN" className="wj-details-input" />
+                <button onClick={() => verifyPin(activeJob.jobId, pinInput)} disabled={loading || pinInput.length !== 4} className="btn btn-primary">Passenger on board</button>
+              </div>
+            ) : STATUS_ACTIONS[activeJob.status] && (
+              <button onClick={() => setStatus(activeJob.jobId, STATUS_ACTIONS[activeJob.status].next)} disabled={Boolean(pendingStatus)} className={`btn btn-primary wj-primary-job-action${pendingStatus ? ' is-confirmed' : ''}`}>
+                {pendingStatus ? 'Confirmed' : STATUS_ACTIONS[activeJob.status].label}
+              </button>
+            )}
+
+            <button type="button" onClick={() => setJobCardExpanded(value => !value)} className="wj-job-details-toggle" aria-expanded={jobCardExpanded}>
+              {jobCardExpanded ? 'Hide job details' : 'More · Job details'}
+            </button>
+
             {jobCardExpanded && (
-              <>
-                {liveMeter && (
-                  <div style={{ marginBottom: '0.75rem', padding: '0.75rem', border: '1.5px solid var(--gold)', borderRadius: 12, background: 'rgba(244,191,27,0.08)' }}>
-                    <div style={{ fontSize: '0.65rem', color: 'var(--gold)', fontWeight: 800, textTransform: 'uppercase' }}>Meter running</div>
-                    <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.7rem', color: 'var(--cream)', lineHeight: 1 }}>{formatCurrency(liveMeter.fare)}</div>
-                    <div style={{ display: 'flex', gap: 12, fontSize: '0.75rem', color: 'var(--cream-dim)', marginTop: '0.25rem' }}>
-                      <span>{Math.floor(liveMeter.elapsedMs / 60000)}m {String(Math.floor((liveMeter.elapsedMs % 60000) / 1000)).padStart(2, '0')}s</span>
-                      <span>{liveMeter.distance.toFixed(1)} mi</span>
-                      {liveMeter.waitingSeconds > 0 && <span>{Math.ceil(liveMeter.waitingSeconds / 60)}m wait</span>}
-                    </div>
-                  </div>
+              <div className="wj-job-details">
+                {activeJob.status === 'ARRIVED' && arrivalWait && (
+                  <div className="wj-job-waiting">Waiting: <b>{arrivalWait.minutes}m {String(arrivalWait.seconds).padStart(2, '0')}s</b>{!arrivalWait.canNoShow && <span>No-show available in {3 - arrivalWait.minutes}m</span>}</div>
                 )}
-                <div style={{ marginBottom: '0.75rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: '0.35rem' }}>
-                    <span className="wj-dot wj-dot-green" style={{ marginTop: 4 }} />
-                    <div style={{ fontSize: '0.85rem' }}><span style={{ color: 'var(--gold)', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>Pickup</span><br />{activeJob.pickupAddress}</div>
-                  </div>
-                  <div style={{ width: 2, height: 14, background: 'var(--border)', marginLeft: 3 }} />
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: '0.25rem' }}>
-                    <span className="wj-dot wj-dot-red" style={{ marginTop: 4 }} />
-                    <div style={{ fontSize: '0.85rem' }}><span style={{ color: 'var(--gold)', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase' }}>Drop-off</span><br />{activeJob.dropoffAddress}</div>
-                  </div>
+                <div className="wj-job-route-details">
+                  <div><span className="wj-dot wj-dot-green" /><p><small>Pickup</small>{activeJob.pickupAddress}</p></div>
+                  <div><span className="wj-dot wj-dot-red" /><p><small>Drop-off</small>{activeJob.dropoffAddress}</p></div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, marginBottom: '0.75rem' }}>
-                  <button type="button" onClick={() => setNavigationTarget({ label: 'pickup', address: activeJob.pickupAddress, lat: activeJob.pickupLat, lng: activeJob.pickupLng })} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Nav to pickup</button>
-                  <button type="button" onClick={() => setNavigationTarget({ label: 'drop off', address: activeJob.dropoffAddress, lat: activeJob.dropoffLat, lng: activeJob.dropoffLng })} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Nav to drop off</button>
+                <div className="wj-job-secondary-grid">
+                  <button type="button" onClick={() => setNavigationTarget({ label: ['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? 'pickup' : 'drop off', address: ['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? activeJob.pickupAddress : activeJob.dropoffAddress, lat: ['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? activeJob.pickupLat : activeJob.dropoffLat, lng: ['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? activeJob.pickupLng : activeJob.dropoffLng })} className="btn btn-outline btn-sm">Open navigation</button>
+                  {activeJob.customerPhone && <a href={`tel:${formatPhone(activeJob.customerPhone)}`} className="btn btn-outline btn-sm">Call passenger</a>}
                 </div>
-                {activeJob.customerPhone && (
-                  <a href={`tel:${formatPhone(activeJob.customerPhone)}`} className="btn btn-outline btn-sm" style={{ display: 'block', textAlign: 'center', marginBottom: '0.75rem' }}>Call passenger</a>
-                )}
-                {activeJob.status === 'ARRIVED' && (
-                  <div style={{ marginBottom: '0.75rem' }}>
-                    {arrivalWait && (
-                      <div style={{ fontSize: '0.85rem', color: 'var(--cream-dim)', marginBottom: '0.5rem' }}>
-                        Waiting: <b>{arrivalWait.minutes}m {String(arrivalWait.seconds).padStart(2, '0')}s</b>
-                        {!arrivalWait.canNoShow && <span style={{ display: 'block', fontSize: '0.75rem' }}>No-show available in {3 - arrivalWait.minutes}m</span>}
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', gap: 8, marginBottom: '0.5rem' }}>
-                      {['call', 'sms', 'whatsapp'].map(method => (
-                        <button key={method} onClick={() => logContactAttempt(activeJob.jobId, method)} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', textTransform: 'capitalize' }}>{method}</button>
-                      ))}
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <input inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={pinInput} onChange={e => setPinInput(e.target.value)} placeholder="Passenger PIN" className="wj-details-input" style={{ flex: 1, textAlign: 'center' }} />
-                      <button onClick={() => verifyPin(activeJob.jobId, pinInput)} disabled={loading || pinInput.length !== 4} className="btn btn-primary">Verify PIN</button>
-                    </div>
-                  </div>
-                )}
-                {STATUS_ACTIONS[activeJob.status] && activeJob.status !== 'ARRIVED' && (
-                  <button onClick={() => setStatus(activeJob.jobId, STATUS_ACTIONS[activeJob.status].next)} disabled={loading} className="btn btn-primary">
-                    {loading ? 'Updating…' : STATUS_ACTIONS[activeJob.status].label}
-                  </button>
-                )}
-                <div style={{ display: 'flex', gap: 8, marginTop: '0.75rem' }}>
-                  <button onClick={() => changeVehicle(activeJob.jobId, 'car')} disabled={loading || activeJob.vehicleType === 'car'} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>Car tariff</button>
-                  <button onClick={() => changeVehicle(activeJob.jobId, 'mpv')} disabled={loading || activeJob.vehicleType === 'mpv'} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center' }}>MPV tariff</button>
+                {activeJob.status === 'ARRIVED' && <div className="wj-job-secondary-grid">{['call', 'sms', 'whatsapp'].map(method => <button key={method} onClick={() => logContactAttempt(activeJob.jobId, method)} disabled={loading} className="btn btn-outline btn-sm" style={{ textTransform: 'capitalize' }}>{method}</button>)}</div>}
+                <div className="wj-job-secondary-grid">
+                  <button onClick={() => changeVehicle(activeJob.jobId, 'car')} disabled={loading || activeJob.vehicleType === 'car'} className="btn btn-outline btn-sm">Car tariff</button>
+                  <button onClick={() => changeVehicle(activeJob.jobId, 'mpv')} disabled={loading || activeJob.vehicleType === 'mpv'} className="btn btn-outline btn-sm">MPV tariff</button>
                 </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: '0.5rem' }}>
-                  <button onClick={() => setStatus(activeJob.jobId, 'NO_SHOW')} disabled={loading || !(arrivalWait && arrivalWait.canNoShow)} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>Customer not here</button>
-                  <button onClick={() => setStatus(activeJob.jobId, 'CUSTOMER_CANCELLED')} disabled={loading} className="btn btn-outline btn-sm" style={{ flex: 1, textAlign: 'center', color: 'crimson', borderColor: 'crimson' }}>Customer cancelled</button>
+                <div className="wj-job-secondary-grid wj-job-danger-actions">
+                  <button onClick={() => setStatus(activeJob.jobId, 'NO_SHOW')} disabled={Boolean(pendingStatus) || !(arrivalWait && arrivalWait.canNoShow)} className="btn btn-outline btn-sm">Customer not here</button>
+                  <button onClick={() => setStatus(activeJob.jobId, 'CUSTOMER_CANCELLED')} disabled={Boolean(pendingStatus)} className="btn btn-outline btn-sm">Customer cancelled</button>
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -1396,13 +1447,13 @@ function DriverPageContent() {
                       {bidBoard.map(job => {
                         const pickupZone = findZone(job.pickupLat, job.pickupLng);
                         const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
-                        const runningMiles = myLocation ? distanceMiles(myLocation.lat, myLocation.lng, job.pickupLat, job.pickupLng) : null;
-                        const fareMiles = distanceMiles(job.pickupLat, job.pickupLng, job.dropoffLat, job.dropoffLng);
+                        const runningRoute = offerRoutes[job.jobId];
+                        const fareMiles = Number(job.miles);
                         return (
                           <article key={job.jobId} className="wj-bid-job">
                             <div className="wj-bid-heading"><div><h3>New bid</h3><p>Review the job details below and ask for it if you're available.</p></div><span className="wj-bid-availability"><i />Online<small>{queueInfo.zoneName}</small></span></div>
                             <div className="wj-bid-details">
-                              <div><span className="wj-bid-icon">●</span><p>Running distance<strong>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</strong><small>Distance from you to pickup</small></p></div>
+                              <div><span className="wj-bid-icon">●</span><p>Running distance<strong>{runningRoute ? `${runningRoute.miles.toFixed(1)} mi` : 'Calculating…'}</strong><small>{runningRoute?.durationText || 'Road route to pickup'}</small></p></div>
                               <div><span className="wj-bid-icon">£</span><p>Maximum fare amount<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
                               <div><span className="wj-bid-icon">╱</span><p>Fare distance<strong>{fareMiles.toFixed(1)} mi</strong><small>Estimated journey distance</small></p></div>
                               <div><span className="wj-bid-icon">◷</span><p>Vehicle<strong>{job.vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</strong><small>Requested vehicle</small></p></div>
@@ -1460,7 +1511,7 @@ function DriverPageContent() {
                         const pickupDate = new Date(offer.pickupTime);
                         const pickupZone = findZone(offer.pickupLat, offer.pickupLng);
                         const dropoffZone = findZone(offer.dropoffLat, offer.dropoffLng);
-                        const runningMiles = myLocation ? distanceMiles(myLocation.lat, myLocation.lng, offer.pickupLat, offer.pickupLng) : null;
+                        const runningRoute = offerRoutes[offer.jobId];
                         return (
                           <div key={offer.jobId} className="card" style={{ border: '2px solid var(--gold)', borderRadius: 18, padding: '1rem', background: 'linear-gradient(135deg, #15130b, #090909)', marginBottom: '0.75rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
@@ -1479,7 +1530,7 @@ function DriverPageContent() {
                               </div>
                               <div style={{ padding: '0.5rem', border: '1.5px solid var(--border-strong)', borderRadius: 10, background: 'rgba(0,0,0,0.25)' }}>
                                 <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Running</div>
-                                <div style={{ fontSize: '0.85rem', color: 'var(--cream)' }}>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</div>
+                                <div style={{ fontSize: '0.85rem', color: 'var(--cream)' }}>{runningRoute ? `${runningRoute.miles.toFixed(1)} mi · ${runningRoute.durationText}` : 'Calculating…'}</div>
                               </div>
                               <div style={{ padding: '0.5rem', border: '1.5px solid var(--border-strong)', borderRadius: 10, background: 'rgba(0,0,0,0.25)' }}>
                                 <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Vehicle</div>
@@ -1512,8 +1563,8 @@ function DriverPageContent() {
                     return shownBookings.map(job => {
                       const pickupZone = findZone(job.pickupLat, job.pickupLng);
                       const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
-                      const runningMiles = myLocation ? distanceMiles(myLocation.lat, myLocation.lng, job.pickupLat, job.pickupLng) : null;
-                      const fareMiles = distanceMiles(job.pickupLat, job.pickupLng, job.dropoffLat, job.dropoffLng);
+                      const runningRoute = offerRoutes[job.jobId];
+                      const fareMiles = Number(job.miles);
                       const date = new Date(job.pickupTime);
                       const accepted = job.driverId === driverId;
                       const dispatched = accepted && job.status !== 'SCHEDULED';
@@ -1524,7 +1575,7 @@ function DriverPageContent() {
                         <div className={`wj-future-status ${accepted ? 'accepted' : ''}`}>{accepted ? (dispatched ? 'Assigned to you' : 'Accepted — awaiting dispatch') : 'Future offer'}</div>
                         <div className="wj-future-time"><span>{date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span><div><strong>{job.dropoffAddress}</strong><small>from {job.pickupAddress}</small></div></div>
                         <div className="wj-future-details-grid">
-                          <div><span>●</span><p>Running distance<strong>{runningMiles != null ? `${runningMiles.toFixed(1)} mi` : '—'}</strong><small>Distance from you to pickup</small></p></div>
+                          <div><span>●</span><p>Running distance<strong>{runningRoute ? `${runningRoute.miles.toFixed(1)} mi` : 'Calculating…'}</strong><small>{runningRoute?.durationText || 'Road route to pickup'}</small></p></div>
                           <div><span>╱</span><p>Fare distance<strong>{fareMiles.toFixed(1)} mi</strong><small>Estimated journey distance</small></p></div>
                           <div><span>↑</span><p>Pickup zone<strong>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : '—'}</strong><small>{job.pickupAddress}</small></p></div>
                           <div><span>↓</span><p>Destination zone<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : '—'}</strong><small>{job.dropoffAddress}</small></p></div>
@@ -1549,13 +1600,35 @@ function DriverPageContent() {
         }} onClick={() => setOpenPanel(null)}>
           <div style={{
             background: 'var(--surface)', border: '1.5px solid var(--border-strong)', borderBottom: 'none',
-            borderRadius: '20px 20px 0 0', padding: '1.1rem'
+            borderRadius: '20px 20px 0 0', padding: '1.1rem', maxHeight: '82vh', overflowY: 'auto'
           }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
               <h2 className="wj-panel-title" style={{ margin: 0 }}>Menu</h2>
               <button className="btn btn-outline btn-sm" onClick={() => setOpenPanel(null)}>Close</button>
             </div>
-            <button className="btn btn-outline" style={{ marginBottom: '0.6rem' }} onClick={() => { setOpenPanel(null); recenterMap(); }}>Re-centre map</button>
+            <div className="card" style={{ padding: '0.8rem', marginBottom: '0.75rem' }}>
+              <strong style={{ display: 'block' }}>{driverName || driverId}</strong>
+              <small style={{ color: 'var(--cream-dim)' }}>{queueInfo.zoneName} · {Math.round(profile?.reliabilityScore || 100)}% reliable · {profile?.status || 'Offline'}</small>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: '0.75rem' }}>
+              <button className="btn btn-outline btn-sm" onClick={() => { setAvailability('AVAILABLE'); setOpenPanel(null); }} disabled={loading || profile?.status === 'AVAILABLE'}>Go available</button>
+              <button className="btn btn-outline btn-sm" onClick={() => { setAvailability('BREAK'); setOpenPanel(null); }} disabled={loading || profile?.status === 'BREAK'}>Take a break</button>
+              <button className="btn btn-outline btn-sm" onClick={() => { setAvailability('OFFLINE'); setOpenPanel(null); }} disabled={loading || profile?.status === 'OFFLINE'}>Go offline</button>
+              <button className="btn btn-outline btn-sm" onClick={() => { setOpenPanel(null); setMapMode('zone'); recenterMap(); }}>Zonal map</button>
+              <button className="btn btn-outline btn-sm" onClick={() => { setOpenPanel(null); setFollowMe(true); setMapMode('route'); }}>Route map</button>
+              <button className="btn btn-outline btn-sm" onClick={() => { setOpenPanel(null); recenterMap(); }}>Re-centre map</button>
+              <button className="btn btn-outline btn-sm" onClick={() => { loadDashboard(); setOpenPanel(null); }}>Refresh jobs</button>
+              <button className="btn btn-outline btn-sm" onClick={() => setOpenPanel('bids')}>Open bids ({bidBoard.length})</button>
+              <button className="btn btn-outline btn-sm" onClick={() => setOpenPanel('future')}>Future jobs ({futureOffers.length})</button>
+              <button className="btn btn-outline btn-sm" onClick={() => {
+                setMapTheme(theme => {
+                  const next = theme === 'dark' ? 'light' : 'dark';
+                  localStorage.setItem('mapTheme', next);
+                  return next;
+                });
+              }}>{mapTheme === 'dark' ? 'Use light map' : 'Use dark map'}</button>
+              <button className="btn btn-outline btn-sm" onClick={() => { setHeaderExpanded(true); setOpenPanel(null); }}>Driver details</button>
+            </div>
             <button className="btn btn-danger" onClick={logout}>Log out</button>
           </div>
         </div>

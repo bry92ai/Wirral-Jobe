@@ -178,8 +178,8 @@ export default function DriverRouteLayer({ map, L, myLocation, activeJob, visibl
         const icon = target.label === 'Pickup' ? divIcon(L, pickupIconSvg, 'route-pickup-marker') : divIcon(L, dropoffIconSvg, 'route-dropoff-marker');
         targetMarkerRef.current = L.marker([target.lat, target.lng], { icon, zIndexOffset: 500 }).addTo(map).bindPopup(`${target.label}: ${target.address}`);
 
+        const bounds = padBounds([[myLocation.lat, myLocation.lng], [target.lat, target.lng], ...route.path]);
         if (fitMap) {
-          const bounds = padBounds([[myLocation.lat, myLocation.lng], [target.lat, target.lng], ...route.path]);
           map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: [40, 40] });
         }
 

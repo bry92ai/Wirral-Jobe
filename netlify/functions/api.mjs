@@ -1,4 +1,5 @@
 const GAS_URL = (process.env.GAS_URL || '').replace(/\/$/, '');
+const GAS_EXEC_URL = GAS_URL.endsWith('/exec') ? GAS_URL : GAS_URL + '/exec';
 
 function jsonResponse(statusCode, body) {
   return {
@@ -51,7 +52,7 @@ export const handler = async (event) => {
   const gasBody = { route, ...payload, ...auth };
 
   try {
-    const response = await fetch(GAS_URL + '/exec', {
+    const response = await fetch(GAS_EXEC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(gasBody),

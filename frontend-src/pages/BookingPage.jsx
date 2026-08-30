@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, apiGet } from '../lib/api.js';
-import { calculateFare, calculateAirportFare, getTimeOfDay } from '../lib/fare.js';
 import { distanceMiles } from '../lib/geo.js';
 import { loadGoogleMapsScript } from '../lib/maps.js';
-import { loadSquarePayments } from '../lib/squarePayments.js';
 import { Geolocation } from '@capacitor/geolocation';
 import logo from '../assets/logo.jpg';
 
@@ -22,67 +20,17 @@ const Icon = {
 const DEFAULT_CENTER = { lat: 53.393, lng: -3.019 };
 const CH49_CENTER = { lat: 53.385, lng: -3.093 };
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-const SQUARE_APPLICATION_ID = import.meta.env.VITE_SQUARE_APPLICATION_ID;
-const SQUARE_LOCATION_ID = import.meta.env.VITE_SQUARE_LOCATION_ID;
 const AIRPORTS = [
   { name: 'Liverpool John Lennon Airport (LPL)', lat: 53.3331, lng: -2.8496 },
   { name: 'Manchester Airport (MAN)', lat: 53.3537, lng: -2.2740 }
 ];
 
 function formatCurrency(n) { return `£${Number(n).toFixed(2)}`; }
-function PaymentForm({ fare, bookingFee, clientSecret, onConfirm, loading, error }) {
-  const containerRef = useRef(null);
-  const cardRef = useRef(null);
-  const [ready, setReady] = useState(!clientSecret);
-  const [paymentError, setPaymentError] = useState('');
-
-  useEffect(() => {
-    if (!clientSecret) return;
-    if (!SQUARE_APPLICATION_ID || !SQUARE_LOCATION_ID) {
-      setPaymentError('Square payment settings are missing.');
-      return;
-    }
-    let active = true;
-    loadSquarePayments(SQUARE_APPLICATION_ID, SQUARE_LOCATION_ID).then(async (payments) => {
-      const card = await payments.card();
-      await card.attach(containerRef.current);
-      if (active) { cardRef.current = card; setReady(true); }
-    }).catch(err => active && setPaymentError(err.message));
-    return () => { active = false; };
-  }, [clientSecret]);
-
-  async function submitPayment() {
-    setPaymentError('');
-    try {
-      let sourceId = null;
-      if (clientSecret) {
-        if (!cardRef.current) throw new Error('Square payment form is still loading.');
-        const token = await cardRef.current.tokenize();
-        if (token.status !== 'OK') throw new Error(token.errors?.[0]?.message || 'Card details could not be verified.');
-        sourceId = token.token;
-      }
-      await onConfirm(sourceId);
-    } catch (err) {
-      setPaymentError(err.message || 'Payment failed.');
-    }
-  }
-
-  const bookingFeeAmount = Number(bookingFee) || 0;
-  const journeyFare = Number(fare) || 0;
-
-  return <>
-    <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '0.75rem' }}>
-      <div className="wj-info-tile"><div className="k">Pay today</div><div className="v">{formatCurrency(bookingFeeAmount)}</div><small>Booking fee</small></div>
-      <div className="wj-info-tile"><div className="k">Pay your driver</div><div className="v">{formatCurrency(journeyFare)}</div><small>Journey fare</small></div>
-    </div>
-    <div style={{ border: '1.5px solid var(--gold)', borderRadius: 12, padding: '0.9rem 1rem', marginBottom: '1rem', background: 'rgba(244, 191, 26, 0.1)' }}>
-      <strong style={{ display: 'block', color: 'var(--gold)', marginBottom: '0.3rem' }}>You are paying {formatCurrency(bookingFeeAmount)} now</strong>
-      <span style={{ color: 'var(--cream-dim)', fontSize: '0.9rem', lineHeight: 1.45 }}>The journey fare of {formatCurrency(journeyFare)} is still payable directly to your driver at the end of the trip.</span>
-    </div>
-    {clientSecret ? <div ref={containerRef} style={{ border: '1.5px solid var(--border-strong)', padding: '0.85rem 1rem', borderRadius: 12, marginBottom: '1rem', background: 'var(--surface)' }} /> : <p style={{ color: 'var(--cream-dim)', fontSize: '0.9rem', marginBottom: '1rem' }}>Card payments are not configured. Tap confirm to place the booking.</p>}
-    {(error || paymentError) && <p className="error">{error || paymentError}</p>}
-    <button onClick={submitPayment} disabled={loading || (clientSecret && !ready)} className="btn btn-primary">{loading ? 'Processing…' : (clientSecret ? `Pay ${formatCurrency(bookingFeeAmount)} booking fee & confirm` : 'Confirm booking')}</button>
-  </>;
+function newClientRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return `req-${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
 function formatPhone(tel) {
@@ -159,22 +107,22 @@ async function nominatimReverse(lat, lng) {
   }
 }
 
-async function osrmRoute(lat1, lng1, lat2, lng2) {
-  try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=false`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Route failed');
-    const data = await res.json();
-    if (!data.routes?.[0]) throw new Error('No route');
-    const r = data.routes[0];
-    const miles = Number((r.distance / 1609.344).toFixed(2));
-    const min = Math.round(r.duration / 60);
-    const durationText = min < 60 ? `${min} min` : `${Math.floor(min / 60)}h ${min % 60}m`;
-    return { miles, durationSec: r.duration, durationText, trafficText: 'Roads clear', trafficStatus: 'green' };
-  } catch {
-    const straight = distanceMiles(lat1, lng1, lat2, lng2);
-    return { miles: straight, durationSec: 0, durationText: '', trafficText: 'Route unavailable', trafficStatus: 'amber' };
-  }
+async function fetchBookingQuote(pickup, dropoff, pickupTime, customerToken) {
+  const quote = await api('booking/quote', {
+    pickupLat: pickup.lat,
+    pickupLng: pickup.lng,
+    dropoffLat: dropoff.lat,
+    dropoffLng: dropoff.lng,
+    pickupTime,
+    customerToken
+  });
+  const minutes = Math.round(Number(quote.durationSec) / 60);
+  return {
+    ...quote,
+    durationText: minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`,
+    trafficText: 'Road route',
+    trafficStatus: 'green'
+  };
 }
 
 function addMinutes(date, minutes) {
@@ -204,7 +152,7 @@ export default function BookingPage() {
 
   const [pickup, setPickup] = useState({ address: '', lat: null, lng: null });
   const [dropoff, setDropoff] = useState({ address: '', lat: null, lng: null });
-  const [route, setRoute] = useState({ miles: 0, durationSec: 0, durationText: '', trafficText: '', trafficStatus: 'green' });
+  const [route, setRoute] = useState({ miles: 0, returnMiles: 0, durationSec: 0, durationText: '', trafficText: '', trafficStatus: 'amber', carFare: 0, mpvFare: 0, valid: false });
   const [routeLoading, setRouteLoading] = useState(false);
 
   const [vehicleType, setVehicleType] = useState('car');
@@ -233,8 +181,6 @@ export default function BookingPage() {
   const [trackingJob, setTrackingJob] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [clientSecret, setClientSecret] = useState(null);
-  const [paymentTarget, setPaymentTarget] = useState('outbound');
 
   const [isAirport, setIsAirport] = useState(false);
   const [airportTripType, setAirportTripType] = useState('single');
@@ -246,6 +192,9 @@ export default function BookingPage() {
   const [returnResult, setReturnResult] = useState(null);
 
   const predictionDebounceRef = useRef(null);
+  const predictionRequestRef = useRef(0);
+  const routeRequestRef = useRef(0);
+  const bookingRequestRef = useRef(null);
 
   function navigateToScreen(nextScreen) {
     window.history.pushState(
@@ -301,12 +250,8 @@ export default function BookingPage() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const quoteTimeOfDay = getTimeOfDay(isFuture || isAirport ? new Date(pickupTime) : new Date());
-  const oneWayCarFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'car' }) || calculateFare({ miles: route.miles, vehicleType: 'car', timeOfDay: quoteTimeOfDay })) || 0;
-  const oneWayMpvFare = (calculateAirportFare({ pickupLat: pickup.lat, pickupLng: pickup.lng, dropoffLat: dropoff.lat, dropoffLng: dropoff.lng, vehicleType: 'mpv' }) || calculateFare({ miles: route.miles, vehicleType: 'mpv', timeOfDay: quoteTimeOfDay })) || 0;
-  const tripCount = isAirport && airportTripType === 'return' ? 2 : 1;
-  const carFare = oneWayCarFare * tripCount;
-  const mpvFare = oneWayMpvFare * tripCount;
+  const carFare = Number(route.carFare) || 0;
+  const mpvFare = Number(route.mpvFare) || 0;
 
   useEffect(() => {
     if (!customerToken) { navigate('/customer', { replace: true }); return; }
@@ -334,11 +279,11 @@ export default function BookingPage() {
       if (typeof navigator !== 'undefined' && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (pos) => setPickupFromLatLng(pos.coords.latitude, pos.coords.longitude),
-          () => setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+          () => setError('We could not get your location. Please choose your pickup address manually.'),
           { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
         );
       } else {
-        setPickupFromLatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
+        setError('Location is unavailable. Please choose your pickup address manually.');
       }
     }
     getPickupLocation();
@@ -346,38 +291,68 @@ export default function BookingPage() {
   }, []);
 
   useEffect(() => {
-    if (pickup.lat != null && dropoff.lat != null) {
-      computeRoute();
-    }
+    if (pickup.lat != null && dropoff.lat != null && customerToken) computeRoute();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickup.lat, pickup.lng, dropoff.lat, dropoff.lng]);
+  }, [pickup.lat, pickup.lng, dropoff.lat, dropoff.lng, pickupTime, returnTrip?.time, returnTrip?.direction, customerToken]);
 
   function setPickupFromLatLng(lat, lng) {
     setPickup({ address: '', lat, lng });
     nominatimReverse(lat, lng).then(address => setPickup({ address, lat, lng }));
   }
 
+  function getReturnLocations() {
+    if (!returnTrip) return null;
+    if (returnTrip.direction === 'from') return { pickup: returnTrip.otherLocation, dropoff: returnTrip.airport };
+    return { pickup: returnTrip.airport, dropoff: returnTrip.otherLocation };
+  }
+
   async function computeRoute() {
+    const requestId = ++routeRequestRef.current;
     setRouteLoading(true);
-    const routeData = await osrmRoute(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
-    setRoute(routeData);
-    setRouteLoading(false);
+    setRoute(current => ({ ...current, valid: false }));
+    setError('');
+    try {
+      const outboundTime = (isFuture || isAirport) && pickupTime ? new Date(pickupTime).toISOString() : new Date().toISOString();
+      const outbound = await fetchBookingQuote(pickup, dropoff, outboundTime, customerToken);
+      const returnLocations = getReturnLocations();
+      let returnQuote = null;
+      if (returnLocations) returnQuote = await fetchBookingQuote(returnLocations.pickup, returnLocations.dropoff, new Date(returnTrip.time).toISOString(), customerToken);
+      if (requestId !== routeRequestRef.current) return;
+      setRoute({
+        ...outbound,
+        returnMiles: returnQuote?.miles || 0,
+        carFare: Number(outbound.carFare) + Number(returnQuote?.carFare || 0),
+        mpvFare: Number(outbound.mpvFare) + Number(returnQuote?.mpvFare || 0),
+        valid: true
+      });
+    } catch (err) {
+      if (requestId !== routeRequestRef.current) return;
+      setRoute({ miles: 0, returnMiles: 0, durationSec: 0, durationText: '', trafficText: 'Route unavailable', trafficStatus: 'amber', carFare: 0, mpvFare: 0, valid: false });
+      setError(err.message || 'We could not calculate a driving route. Please check both addresses and try again.');
+    } finally {
+      if (requestId === routeRequestRef.current) setRouteLoading(false);
+    }
   }
 
   async function fetchPredictions(input) {
     if (!input || input.length < 2) {
+      predictionRequestRef.current += 1;
       setPredictions([]);
+      setFetchingPredictions(false);
       return;
     }
+    const requestId = ++predictionRequestRef.current;
     setFetchingPredictions(true);
     const center = pickup.lat != null ? { lat: pickup.lat, lng: pickup.lng } : DEFAULT_CENTER;
     try {
       const googlePredictions = await googlePlaceSearch(input);
-      setPredictions(googlePredictions.length ? googlePredictions : await nominatimSearch(input, center));
+      const results = googlePredictions.length ? googlePredictions : await nominatimSearch(input, center);
+      if (requestId === predictionRequestRef.current) setPredictions(results);
     } catch {
-      setPredictions(await nominatimSearch(input, center));
+      const results = await nominatimSearch(input, center);
+      if (requestId === predictionRequestRef.current) setPredictions(results);
     } finally {
-      setFetchingPredictions(false);
+      if (requestId === predictionRequestRef.current) setFetchingPredictions(false);
     }
   }
 
@@ -402,14 +377,21 @@ export default function BookingPage() {
   }
 
   function applySelection(address, lat, lng) {
+    const latitude = Number(lat);
+    const longitude = Number(lng);
+    if (!address || !Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      setError('That address does not have a valid map location. Please choose another result.');
+      return;
+    }
+    setRoute(current => ({ ...current, valid: false }));
     if (predictionsFor === 'pickup') {
-      setPickup({ address, lat, lng });
+      setPickup({ address, lat: latitude, lng: longitude });
       setPredictionsFor('dropoff');
       setQuery('');
       setPredictions([]);
       navigateToScreen('destination');
     } else {
-      setDropoff({ address, lat, lng });
+      setDropoff({ address, lat: latitude, lng: longitude });
       setQuery('');
       setPredictions([]);
       navigateToScreen('route');
@@ -422,8 +404,10 @@ export default function BookingPage() {
     setAirportTripType('single');
     setReturnTrip(null);
     setReturnResult(null);
-    setPredictionsFor('dropoff');
-    navigateToScreen('destination');
+    const hasPickup = pickup.lat != null && pickup.lng != null && pickup.address;
+    setPredictionsFor(hasPickup ? 'dropoff' : 'pickup');
+    if (!hasPickup) setError('Please choose your pickup address before selecting a destination.');
+    navigateToScreen(hasPickup ? 'destination' : 'pickup-search');
   }
 
   function startFuture() {
@@ -433,8 +417,10 @@ export default function BookingPage() {
     setReturnTrip(null);
     setReturnResult(null);
     setPickupTime(toIsoLocal(addMinutes(new Date(), 60)));
-    setPredictionsFor('dropoff');
-    navigateToScreen('destination');
+    const hasPickup = pickup.lat != null && pickup.lng != null && pickup.address;
+    setPredictionsFor(hasPickup ? 'dropoff' : 'pickup');
+    if (!hasPickup) setError('Please choose your pickup address before selecting a destination.');
+    navigateToScreen(hasPickup ? 'destination' : 'pickup-search');
   }
 
   function startAirport() {
@@ -487,6 +473,7 @@ export default function BookingPage() {
       return;
     }
     setError('');
+    setRoute(current => ({ ...current, valid: false }));
     const airport = { address: selectedAirport.name, lat: selectedAirport.lat, lng: selectedAirport.lng };
     if (airportDirection === 'to') {
       setPickup(otherLocation);
@@ -504,14 +491,34 @@ export default function BookingPage() {
   }
 
   async function submitBooking() {
+    if (loading) return;
     if (!String(customerName).trim() || !String(customerPhone).trim()) {
       setError('Please enter your name and mobile number.');
+      return;
+    }
+    if (!/^\+?[\d\s()-]{10,}$/.test(String(customerPhone).trim())) {
+      setError('Please check the mobile number on your account.');
+      return;
+    }
+    if (bookingForSomeoneElse && (!passengerName.trim() || !/^\+?[\d\s()-]{10,}$/.test(passengerPhone.trim()))) {
+      setError('Please enter the passenger’s name and a valid mobile number.');
+      return;
+    }
+    if ((isFuture || isAirport) && (!pickupTime || new Date(pickupTime).getTime() <= Date.now())) {
+      setError('Please choose a pickup time in the future.');
       return;
     }
     if (!pickup.address || !dropoff.address || pickup.lat == null || dropoff.lat == null) {
       setError('Please select a pickup and destination.');
       return;
     }
+    if (routeLoading || !route.valid || !Number.isFinite(route.miles) || route.miles <= 0) {
+      setError('A verified driving route is required before booking. Please wait or try the addresses again.');
+      return;
+    }
+    const requestFingerprint = JSON.stringify([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng, pickupTime, returnTrip?.time, vehicleType]);
+    if (bookingRequestRef.current?.fingerprint !== requestFingerprint) bookingRequestRef.current = { fingerprint: requestFingerprint, id: newClientRequestId() };
+    const clientRequestId = bookingRequestRef.current.id;
     setError('');
     setLoading(true);
     try {
@@ -524,7 +531,7 @@ export default function BookingPage() {
         dropoffLng: dropoff.lng,
         miles: route.miles,
         vehicleType,
-        timeOfDay: quoteTimeOfDay,
+        clientRequestId: `${clientRequestId}:outbound`,
         pickupTime: (isFuture || isAirport) && pickupTime ? new Date(pickupTime).toISOString() : new Date().toISOString(),
         customerToken,
         passengers,
@@ -533,29 +540,26 @@ export default function BookingPage() {
         ...(childSeats ? { childSeats } : {}),
         ...(accessibility ? { accessibility } : {}),
         customerNotes,
-        ...(bookingForSomeoneElse ? { bookingForSomeoneElse: true, passengerName: passengerName.trim(), passengerPhone: passengerPhone.trim() } : {})
+        ...(bookingForSomeoneElse ? { bookingForSomeoneElse: true, passengerName: passengerName.trim(), passengerPhone: formatPhone(passengerPhone) } : {})
       };
       if (!returnTrip) {
         const outbound = await api('booking', booking);
         if (outbound.error) throw new Error(outbound.error);
-        setResult({ ...outbound, jobId: outbound.pendingBookingId });
-        setClientSecret(outbound.clientSecret || null);
-        setPaymentTarget('outbound');
-        navigateToScreen('payment');
+        const confirmed = await api('booking/confirm', { pendingBookingId: outbound.pendingBookingId });
+        if (confirmed.error) throw new Error(confirmed.error);
+        setResult({ ...outbound, ...confirmed, jobId: confirmed.jobId || outbound.pendingBookingId });
+        navigateToScreen('success');
       } else {
         const returnDate = new Date(returnTrip.time);
-        let returnPickup = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
-        let returnDropoff = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
-        if (returnTrip.direction === 'from') {
-          returnPickup = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
-          returnDropoff = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
-        }
-        if (returnPickup.lat == null || returnPickup.lng == null || returnDropoff.lat == null || returnDropoff.lng == null) {
+        const returnLocations = getReturnLocations();
+        const returnPickup = returnLocations?.pickup;
+        const returnDropoff = returnLocations?.dropoff;
+        if (!returnPickup || !returnDropoff || returnPickup.lat == null || returnPickup.lng == null || returnDropoff.lat == null || returnDropoff.lng == null) {
           setError('Return trip locations are incomplete.');
           setLoading(false);
           return;
         }
-        const returnMiles = distanceMiles(returnPickup.lat, returnPickup.lng, returnDropoff.lat, returnDropoff.lng);
+        if (!Number.isFinite(route.returnMiles) || route.returnMiles <= 0) throw new Error('A verified driving route is required for the return journey.');
         const returnBooking = {
           pickupAddress: returnPickup.address,
           dropoffAddress: returnDropoff.address,
@@ -563,9 +567,9 @@ export default function BookingPage() {
           pickupLng: returnPickup.lng,
           dropoffLat: returnDropoff.lat,
           dropoffLng: returnDropoff.lng,
-          miles: returnMiles,
+          miles: route.returnMiles,
           vehicleType,
-          timeOfDay: getTimeOfDay(returnDate),
+          clientRequestId: `${clientRequestId}:return`,
           pickupTime: returnDate.toISOString(),
           customerToken,
           passengers,
@@ -574,88 +578,21 @@ export default function BookingPage() {
           ...(childSeats ? { childSeats } : {}),
           ...(accessibility ? { accessibility } : {}),
           customerNotes,
-          ...(bookingForSomeoneElse ? { bookingForSomeoneElse: true, passengerName: passengerName.trim(), passengerPhone: passengerPhone.trim() } : {})
+          ...(bookingForSomeoneElse ? { bookingForSomeoneElse: true, passengerName: passengerName.trim(), passengerPhone: formatPhone(passengerPhone) } : {})
         };
         const pair = await api('booking/return-pair', { outbound: booking, return: returnBooking });
         if (pair.error) throw new Error(pair.error);
-        setResult({
-          jobId: pair.outbound.pendingBookingId,
-          outboundJobId: pair.outbound.pendingBookingId,
-          returnJobId: pair.return.pendingBookingId,
-          fare: (pair.outbound.fare || 0) + (pair.return.fare || 0),
-          bookingFee: (pair.outbound.bookingFee || 0) + (pair.return.bookingFee || 0),
-          clientSecret: pair.outbound.clientSecret || null,
-          trackingToken: pair.outbound.trackingToken
+        const confirmed = await api('booking/confirm-pair', {
+          outboundPendingBookingId: pair.outbound.pendingBookingId,
+          returnPendingBookingId: pair.return.pendingBookingId
         });
-        setReturnResult({ ...pair.return, jobId: pair.return.pendingBookingId });
-        setClientSecret(pair.outbound.clientSecret || null);
-        setPaymentTarget('pair');
-        navigateToScreen('payment');
+        if (confirmed.error) throw new Error(confirmed.error);
+        setResult({ ...pair.outbound, jobId: confirmed.outboundJobId || pair.outbound.pendingBookingId });
+        setReturnResult({ ...pair.return, jobId: confirmed.returnJobId || pair.return.pendingBookingId });
+        navigateToScreen('success');
       }
     } catch (err) {
       setError(err.message || 'Booking failed. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function createReturnBooking() {
-    if (!returnTrip) return;
-    const returnDate = new Date(returnTrip.time);
-    let returnPickup = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
-    let returnDropoff = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
-    if (returnTrip.direction === 'from') {
-      returnPickup = { address: returnTrip.otherLocation.address, lat: returnTrip.otherLocation.lat, lng: returnTrip.otherLocation.lng };
-      returnDropoff = { address: returnTrip.airport.address, lat: returnTrip.airport.lat, lng: returnTrip.airport.lng };
-    }
-    if (returnPickup.lat == null || returnPickup.lng == null || returnDropoff.lat == null || returnDropoff.lng == null) {
-      setError('Return trip locations are incomplete.');
-      return;
-    }
-    const returnMiles = distanceMiles(returnPickup.lat, returnPickup.lng, returnDropoff.lat, returnDropoff.lng);
-    const returnData = await api('booking', {
-      pickupAddress: returnPickup.address,
-      dropoffAddress: returnDropoff.address,
-      pickupLat: returnPickup.lat,
-      pickupLng: returnPickup.lng,
-      dropoffLat: returnDropoff.lat,
-      dropoffLng: returnDropoff.lng,
-      miles: returnMiles,
-      vehicleType,
-      timeOfDay: getTimeOfDay(returnDate),
-      pickupTime: returnDate.toISOString(),
-      customerToken,
-      passengers,
-      luggage,
-      ...(isAirport && flightNumber ? { flightNumber } : {}),
-      ...(childSeats ? { childSeats } : {}),
-      ...(accessibility ? { accessibility } : {}),
-      customerNotes,
-      ...(bookingForSomeoneElse ? { bookingForSomeoneElse: true, passengerName: passengerName.trim(), passengerPhone: passengerPhone.trim() } : {})
-    });
-    if (returnData.error) throw new Error(returnData.error);
-    setReturnResult({ ...returnData, jobId: returnData.pendingBookingId });
-    setResult({ ...returnData, jobId: returnData.pendingBookingId });
-    setClientSecret(returnData.clientSecret || null);
-    setPaymentTarget('return');
-  }
-
-  async function confirmPayment(sourceId) {
-    if (!result) return;
-    setError(''); setLoading(true);
-    try {
-      if (paymentTarget === 'pair' && returnResult) {
-        const confirm = await api('booking/confirm-pair', { outboundPendingBookingId: result.outboundJobId, returnPendingBookingId: returnResult.jobId, sourceId });
-        if (confirm.error) throw new Error(confirm.error);
-        navigateToScreen('success');
-        return;
-      }
-
-      const confirm = await api('booking/confirm', { pendingBookingId: result.jobId, sourceId });
-      if (confirm.error) throw new Error(confirm.error);
-      navigateToScreen('success');
-    } catch (err) {
-      setError(err.message || 'Payment failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -928,10 +865,11 @@ export default function BookingPage() {
             {vehicleCard('mpv', 'MPV', 'Up to 8 passengers', mpvFare)}
             <div className="wj-ride-notice">
               <span><Icon.shield /></span>
-              <div><strong>Maximum chargeable amount</strong><small>This is the most we can charge for your journey. Final fare may be less.</small></div>
+              <div><strong>Estimated journey fare</strong><small>Nothing to pay now. Pay your driver directly at the end of the journey.</small></div>
             </div>
-            <button onClick={() => navigateToScreen('details')} disabled={!vehicleType || routeLoading} className="wj-ride-continue">
-              {routeLoading ? 'Calculating route…' : 'Continue'}
+            {error && <p className="error">{error}</p>}
+            <button onClick={() => navigateToScreen('details')} disabled={!vehicleType || routeLoading || !route.valid} className="wj-ride-continue">
+              {routeLoading ? 'Calculating route…' : route.valid ? 'Continue' : 'Route required'}
             </button>
             <div className="wj-ride-footer">▱ &nbsp; Safe &amp; secure &nbsp; | &nbsp; ♙ &nbsp; Local drivers &nbsp; | &nbsp; ♢ &nbsp; Fair prices</div>
           </div>
@@ -1008,6 +946,12 @@ export default function BookingPage() {
             {isFuture && (
               <input className="wj-details-datetime" type="datetime-local" value={pickupTime} min={toIsoLocal(new Date())} onChange={e => setPickupTime(e.target.value)} />
             )}
+            <div className="wj-info-grid" style={{ gridTemplateColumns: '1fr', margin: '1rem 0' }}>
+              <div><small>Pickup</small><strong>{pickup.address}</strong></div>
+              <div><small>Destination</small><strong>{dropoff.address}</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}><span><small>Vehicle</small><strong>{vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</strong></span><span style={{ textAlign: 'right' }}><small>Estimated fare</small><strong>{formatCurrency(vehicleType === 'mpv' ? mpvFare : carFare)}</strong></span></div>
+              <small style={{ color: 'var(--cream-dim)' }}>Nothing to pay now. Pay your driver at the end of the journey.</small>
+            </div>
             <div className="wj-details-safety">
               <span><Icon.shield /></span>
               <div><strong>You're in safe hands</strong><small>Local drivers. Local knowledge.<br />Always on call.</small></div>
@@ -1018,34 +962,8 @@ export default function BookingPage() {
           </div>
         );
 
-      case 'payment':
-        return (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              {backBtn(goBack)}
-              {futureTag()}
-            </div>
-            {panelTitle('Payment')}
-            {result ? (
-              <PaymentForm
-                fare={result.fare}
-                bookingFee={result.bookingFee}
-                clientSecret={clientSecret}
-                onConfirm={confirmPayment}
-                loading={loading}
-                error={error}
-                pendingBookingId={paymentTarget !== 'pair' ? result.jobId : undefined}
-                outboundPendingBookingId={paymentTarget === 'pair' ? result.outboundJobId : undefined}
-                returnPendingBookingId={paymentTarget === 'pair' ? returnResult?.jobId : undefined}
-              />
-            ) : (
-              <p className="error">No booking data. Please go back and try again.</p>
-            )}
-          </div>
-        );
-
       case 'success':
-        const allocated = trackingJob && trackingJob.status !== 'NEW' && trackingJob.status !== 'CANCELLED';
+        const allocated = Boolean(trackingJob?.driverId) && ['ASSIGNED', 'ON_WAY', 'ARRIVED', 'POB', 'COMPLETE'].includes(trackingJob.status);
         const trackingLabel = {
           NEW: 'Finding a driver',
           ASSIGNED: 'Driver assigned',
@@ -1068,7 +986,7 @@ export default function BookingPage() {
                         ? <><span style={{ color: 'var(--green)', fontWeight: 800 }}>{trackingLabel}</span><br />{trackingJob.driverId && `Driver ${trackingJob.driverId}`}{trackingJob.driverLocationAt && <small style={{ display: 'block', marginTop: 4, color: 'var(--cream-dim)' }}>Location updated {new Date(trackingJob.driverLocationAt).toLocaleTimeString()}</small>}</>
                         : 'We are allocating a driver now.'))}
             </p>
-            {result && !isFuture && (
+            {result && !isFuture && allocated && (
               <button
                 onClick={() => navigate(`/track/${result.trackingToken}`)}
                 className="btn btn-primary"
@@ -1087,10 +1005,6 @@ export default function BookingPage() {
                   <span style={{ color: 'var(--cream-dim)' }}>{returnResult ? 'Outbound fare' : 'Fare estimate'}</span>
                   <span style={{ fontWeight: 800 }}>{formatCurrency(result.fare)}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--cream-dim)' }}>{returnResult ? 'Outbound booking fee' : 'Booking fee'}</span>
-                  <span style={{ fontWeight: 800 }}>{formatCurrency(result.bookingFee)}</span>
-                </div>
               </div>
             )}
             {returnResult && (
@@ -1102,10 +1016,6 @@ export default function BookingPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'var(--cream-dim)' }}>Return fare</span>
                   <span style={{ fontWeight: 800 }}>{formatCurrency(returnResult.fare)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--cream-dim)' }}>Return booking fee</span>
-                  <span style={{ fontWeight: 800 }}>{formatCurrency(returnResult.bookingFee)}</span>
                 </div>
               </div>
             )}

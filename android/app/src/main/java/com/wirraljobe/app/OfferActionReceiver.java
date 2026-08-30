@@ -6,8 +6,6 @@ import android.content.Intent;
 import android.util.Log;
 import android.widget.Toast;
 
-import androidx.core.content.ContextCompat;
-
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -43,7 +41,7 @@ public class OfferActionReceiver extends BroadcastReceiver {
         }
 
         if ("com.wirraljobe.app.action.SHOW_OFFER".equals(action)) {
-            startFloatingService(context, intent, apiUrl);
+            openDriverApp(context);
             return;
         }
 
@@ -75,17 +73,10 @@ public class OfferActionReceiver extends BroadcastReceiver {
         }).start();
     }
 
-    private void startFloatingService(Context context, Intent intent, String apiUrl) {
-        Intent showIntent = new Intent(context, FloatingOfferService.class);
-        showIntent.putExtra("apiUrl", apiUrl);
-        showIntent.putExtra("jobId", intent.getStringExtra("jobId"));
-        showIntent.putExtra("driverId", intent.getStringExtra("driverId"));
-        showIntent.putExtra("acceptToken", intent.getStringExtra("acceptToken"));
-        showIntent.putExtra("declineToken", intent.getStringExtra("declineToken"));
-        showIntent.putExtra("pickup", intent.getStringExtra("pickup"));
-        showIntent.putExtra("dropoff", intent.getStringExtra("dropoff"));
-        showIntent.putExtra("fare", intent.getStringExtra("fare"));
-        ContextCompat.startForegroundService(context, showIntent);
+    private void openDriverApp(Context context) {
+        Intent appIntent = new Intent(context, MainActivity.class);
+        appIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        context.startActivity(appIntent);
     }
 
     private void sendSecureAction(Context context, String apiUrl, String jobId, String driverId, String secureAction, String token) {

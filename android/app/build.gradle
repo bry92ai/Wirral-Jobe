@@ -7,8 +7,8 @@ android {
         applicationId "com.wirraljobe.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 5
-        versionName "1.4"
+        versionCode 18
+        versionName "3.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -25,6 +25,9 @@ android {
         }
     }
     buildTypes {
+        debug {
+            versionNameSuffix "-test.7"
+        }
         release {
             signingConfig signingConfigs.release
             minifyEnabled false
