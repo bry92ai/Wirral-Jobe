@@ -136,7 +136,7 @@ export default function DriverNavigationMap({ myLocation, heading, activeJob, th
     const targetHeading = Number.isFinite(heading) ? heading : startHeading;
     const headingDelta = ((targetHeading - startHeading + 540) % 360) - 180;
     const startedAt = performance.now();
-    const duration = 1200;
+    const duration = 150;
 
     const animate = now => {
       const progress = Math.min(1, (now - startedAt) / duration);
@@ -149,7 +149,7 @@ export default function DriverNavigationMap({ myLocation, heading, activeJob, th
       driverMarkerRef.current?.setLngLat([location.lng, location.lat]);
       const icon = driverMarkerRef.current?.getElement().querySelector('.wj-navigation-taxi-icon');
       if (icon) icon.style.transform = `rotate(${currentHeading - map.getBearing()}deg)`;
-      if (follow) map.easeTo({ center: [location.lng, location.lat], zoom: Math.max(map.getZoom(), 17.5), bearing: currentHeading, pitch: 58, offset: [0, 190], duration: 0, essential: true });
+      if (follow) map.easeTo({ center: [location.lng, location.lat], zoom: Math.max(map.getZoom(), 17.5), bearing: currentHeading, pitch: 58, offset: [0, 190], duration, essential: true });
       displayedLocationRef.current = location;
       displayedHeadingRef.current = currentHeading;
       if (progress < 1) animationRef.current = requestAnimationFrame(animate);
