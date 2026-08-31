@@ -2972,6 +2972,16 @@ function setupScheduledTriggers() {
   return { ok: true };
 }
 
+function testFcm() {
+  const token = getFcmAccessToken();
+  if (!token) return { ok: false, stage: 'oauth', message: 'getFcmAccessToken() returned null. Check FCM_* script properties and OAuth errors above.', tokenLength: 0 };
+  const drivers = getDrivers().filter(d => d.fcm_token);
+  if (drivers.length === 0) return { ok: false, stage: 'registration', message: 'No driver has an fcm_token. The app did not register for push.', driversWithToken: 0 };
+  const driver = drivers[0];
+  const result = sendPushToDriver(driver.id, 'Wirral Jobe test', 'This is a test push.', { type: 'test' });
+  return { ok: result, stage: 'send', driverId: driver.id, fcmTokenLength: String(driver.fcm_token).length };
+}
+
 function processFutureBookings() {
   const now = Date.now();
   getJobs().forEach(job => {
