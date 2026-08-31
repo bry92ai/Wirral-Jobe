@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { vehicleIconHtml } from '../lib/leaflet.js';
+import taxiMarker from '../assets/taxi-marker.png';
 
 const ACCESS_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
 const API_BASE = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/+$/, '');
@@ -126,7 +126,7 @@ export default function DriverNavigationMap({ myLocation, heading, activeJob, th
     if (!driverMarkerRef.current) {
       const element = document.createElement('div');
       element.className = 'wj-navigation-taxi';
-      element.innerHTML = `<div class="wj-navigation-taxi-icon">${vehicleIconHtml('car', '#f4bf1b', null, 48)}</div>`;
+      element.innerHTML = `<div class="wj-navigation-taxi-icon"><img src="${taxiMarker}" alt="" style="width:44px;height:44px;display:block;" /></div>`;
       driverMarkerRef.current = new mapboxgl.Marker({ element, rotationAlignment: 'viewport' }).setLngLat([myLocation.lng, myLocation.lat]).addTo(map);
       displayedLocationRef.current = myLocation;
       displayedHeadingRef.current = Number.isFinite(heading) ? heading : 0;
