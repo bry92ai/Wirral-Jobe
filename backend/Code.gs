@@ -1308,7 +1308,7 @@ function sendPushNotification(fcmToken, title, body, data) {
     notificationPriority: isOffer ? 'PRIORITY_MAX' : 'PRIORITY_DEFAULT',
     defaultSound: true,
     defaultVibrateTimings: true,
-    visibility: 'VISIBILITY_PUBLIC'
+    visibility: 'PUBLIC'
   };
   // For job offers we send a data-only message so the custom Android service can
   // build a notification with Accept/Decline action buttons and avoid a duplicate
