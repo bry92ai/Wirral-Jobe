@@ -1239,6 +1239,7 @@ function customerRegisterPush(body) {
     const col = CUSTOMER_HEADERS.indexOf('fcm_token') + 1;
     sheet.getRange(row, col).setValue(fcmToken);
   }
+  Logger.log('Customer %s registered FCM token (len %s)', customer.id, fcmToken.length);
   return { ok: true };
 }
 
@@ -1248,6 +1249,7 @@ function driverRegisterPush(body) {
   const driverId = getDriverIdByToken(driverToken);
   if (!driverId) throw new Error('Invalid driver token');
   updateDriver(driverId, { fcm_token: fcmToken });
+  Logger.log('Driver %s registered FCM token (len %s)', driverId, fcmToken.length);
   return { ok: true };
 }
 
@@ -1256,7 +1258,10 @@ function getFcmAccessToken() {
   const email = props.getProperty('FCM_CLIENT_EMAIL');
   const key = (props.getProperty('FCM_PRIVATE_KEY') || '').replace(/\\n/g, '\n').trim();
   const projectId = props.getProperty('FCM_PROJECT_ID');
-  if (!email || !key || !projectId) return null;
+  if (!email || !key || !projectId) {
+    Logger.log('FCM credentials missing: email=%s project=%s keyLen=%s', !!email, !!projectId, key.length);
+    return null;
+  }
   const now = Math.floor(Date.now() / 1000);
   const header = Utilities.base64EncodeWebSafe(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
   const claim = Utilities.base64EncodeWebSafe(JSON.stringify({
@@ -1274,6 +1279,7 @@ function getFcmAccessToken() {
     muteHttpExceptions: true
   });
   const tokenData = JSON.parse(tokenRes.getContentText() || '{}');
+  Logger.log('FCM token response: %s %s', tokenRes.getResponseCode(), JSON.stringify(tokenData).slice(0, 200));
   return tokenData.access_token || null;
 }
 
@@ -1331,7 +1337,7 @@ function sendPushNotification(fcmToken, title, body, data) {
 
 function sendPushToCustomer(customerId, title, body, data) {
   const customer = getCustomers().find(c => c.id === customerId);
-  if (!customer || !customer.fcm_token) return false;
+  if (!customer || !customer.fcm_token) { Logger.log('No FCM token for customer %s', customerId); return false; }
   return sendPushNotification(customer.fcm_token, title, body, data);
 }
 
@@ -1356,7 +1362,7 @@ function notifyCustomer(job, pushTitle, pushBody, pushData, smsKey, smsExtra) {
 
 function sendPushToDriver(driverId, title, body, data) {
   const driver = findDriverById(driverId);
-  if (!driver || !driver.fcm_token) return false;
+  if (!driver || !driver.fcm_token) { Logger.log('No FCM token for driver %s', driverId); return false; }
   return sendPushNotification(driver.fcm_token, title, body, data);
 }
 
