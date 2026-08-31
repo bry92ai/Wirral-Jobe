@@ -334,6 +334,7 @@ function routeRequest(route, body, params, driverId, driverToken, adminToken) {
   if (parts[0] === 'driver' && parts[1] === 'bid-board' && parts[3] === 'bid') return placeBid(parts[2], body, requireDriver(driverId, driverToken).id);
   if (r === 'driver/future-bookings') return getDriverFutureBookings(requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'future-bookings' && parts[3] === 'accept') return acceptFutureBooking(parts[2], requireDriver(driverId, driverToken).id);
+  if (parts[0] === 'driver' && parts[1] === 'future-bookings' && parts[3] === 'release') return releaseFutureBooking(parts[2], requireDriver(driverId, driverToken).id);
   if (r === 'driver/future-offers') return getDriverFutureOffers(requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'future-offers' && parts[3] === 'accept') return acceptFutureOffer(parts[2], requireDriver(driverId, driverToken).id);
   if (parts[0] === 'driver' && parts[1] === 'future-offers' && parts[3] === 'decline') return declineFutureOffer(parts[2], requireDriver(driverId, driverToken).id);
@@ -1972,6 +1973,18 @@ function acceptFutureBooking(jobId, driverId) {
   return { ok: true, jobId, driverId };
 }
 
+function releaseFutureBooking(jobId, driverId) {
+  if (!driverId) throw new Error('No driver ID');
+  const job = findJobById(jobId);
+  if (!job) throw new Error('Job not found');
+  if (job.driver_id !== driverId) throw new Error('Job is not assigned to you');
+  if (!['SCHEDULED', 'NEW'].includes(job.status)) throw new Error('Job can no longer be released');
+  const now = new Date().toISOString();
+  updateJob(jobId, { driver_id: null, commission_rate: 0, updated_at: now });
+  writeAudit('driver', driverId, 'future_booking_released', 'job', jobId, {});
+  return { ok: true, jobId, driverId };
+}
+
 function getTracking(token) {
   const job = getJobs().find(j => j.tracking_token === token);
   if (!job) throw new Error('Tracking link not found');
@@ -2619,7 +2632,8 @@ function advanceOffers() {
         SpreadsheetApp.flush();
         if (winnerId) {
           startOfferToDriver(offer.jobId, Number(offer.pickupLat), Number(offer.pickupLng), winnerId);
-          updateJob(offer.jobId, { status: 'OFFERED', updated_at: nowIso });
+          SpreadsheetApp.flush();
+          acceptOfferUnlocked(offer.jobId, winnerId);
         } else {
           updateJob(offer.jobId, { status: 'BIDDING', updated_at: nowIso });
           notifyAvailableDrivers(findJobById(offer.jobId), 'job_available', 'New job available');
@@ -2756,7 +2770,8 @@ function getBidBoard(driverId) {
   startMissingBidWindows();
   advanceOffers();
   const nowMs = Date.now();
-  const jobs = getJobs().filter(j => j.status === 'BIDDING');
+  const liveCutoff = nowMs + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000;
+  const jobs = getJobs().filter(j => j.status === 'BIDDING' && new Date(j.pickup_time).getTime() <= liveCutoff);
   const bids = getBids();
   const offers = getOffers();
   return { jobs: jobs.map(job => {
@@ -2791,6 +2806,8 @@ function placeBidUnlocked(jobId, body, driverId) {
   const driver = findDriverById(driverId);
   if (!driver) throw new Error('Driver not found');
   if (job.status !== 'BIDDING') throw new Error('Job is no longer open for bids');
+  const pickupAt = new Date(job.pickup_time).getTime();
+  if (pickupAt > Date.now() + FUTURE_ALLOCATION_WINDOW_MINUTES * 60000) throw new Error('Future bookings are not open for bids');
   const existingBid = getBids().some(b => b.job_id === jobId && b.driver_id === driverId);
   if (existingBid) throw new Error('You have already asked for this job');
   const now = new Date().toISOString();

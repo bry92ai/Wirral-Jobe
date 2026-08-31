@@ -452,6 +452,15 @@ function DriverPageContent() {
     finally { setLoading(false); }
   }
 
+  async function releaseFutureBooking(jobId) {
+    setLoading(true); setError('');
+    try {
+      await api(`driver/future-bookings/${jobId}/release`, {}, driverAuth());
+      await Promise.all([loadFutureBookings(), loadFutureOffers(), loadJobs()]);
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
   async function acceptFutureOffer(jobId) {
     setLoading(true); setError('');
     try {
@@ -1586,7 +1595,12 @@ function DriverPageContent() {
                           <div><span>↓</span><p>Destination zone<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : '—'}</strong><small>{job.dropoffAddress}</small></p></div>
                           <div><span>£</span><p>Maximum fare amount<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
                         </div>
-                        {accepted ? <div className="wj-future-accepted">{dispatched ? 'Assigned to you' : 'Accepted — awaiting dispatch'}</div> : <div className="wj-future-actions"><button onClick={() => acceptFutureBooking(job.jobId)} disabled={loading}>Accept offer</button><button onClick={() => setFutureBookings(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading}>Pass</button></div>}
+                        {accepted ? (
+                          <div className="wj-future-actions">
+                            <span className="wj-future-accepted">{dispatched ? 'Assigned to you' : 'Accepted — awaiting dispatch'}</span>
+                            {!dispatched && <button onClick={() => releaseFutureBooking(job.jobId)} disabled={loading}>Release</button>}
+                          </div>
+                        ) : <div className="wj-future-actions"><button onClick={() => acceptFutureBooking(job.jobId)} disabled={loading}>Accept offer</button><button onClick={() => setFutureBookings(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading}>Pass</button></div>}
                       </article></div>;
                     });
                   })()}
