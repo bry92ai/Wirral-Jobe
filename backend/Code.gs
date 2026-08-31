@@ -1255,9 +1255,10 @@ function driverRegisterPush(body) {
 
 function getFcmAccessToken() {
   const props = PropertiesService.getScriptProperties();
-  const email = props.getProperty('FCM_CLIENT_EMAIL');
-  const key = (props.getProperty('FCM_PRIVATE_KEY') || '').replace(/\\n/g, '\n').trim();
-  const projectId = props.getProperty('FCM_PROJECT_ID');
+  const email = (props.getProperty('FCM_CLIENT_EMAIL') || '').replace(/^"|"$/g, '').trim();
+  let key = (props.getProperty('FCM_PRIVATE_KEY') || '').replace(/\\n/g, '\n').trim();
+  key = key.replace(/^"|"$/g, '');
+  const projectId = (props.getProperty('FCM_PROJECT_ID') || '').replace(/^"|"$/g, '').trim();
   if (!email || !key || !projectId) {
     Logger.log('FCM credentials missing: email=%s project=%s keyLen=%s', !!email, !!projectId, key.length);
     return null;
@@ -1271,16 +1272,27 @@ function getFcmAccessToken() {
     scope: 'https://www.googleapis.com/auth/firebase.messaging'
   }));
   const signInput = header + '.' + claim;
-  const signature = Utilities.base64EncodeWebSafe(Utilities.computeRsaSha256Signature(signInput, key));
-  const jwt = signInput + '.' + signature;
+  let jwt;
+  try {
+    const signature = Utilities.base64EncodeWebSafe(Utilities.computeRsaSha256Signature(signInput, key));
+    jwt = signInput + '.' + signature;
+  } catch (e) {
+    Logger.log('FCM private key sign error: %s', e.message);
+    return null;
+  }
   const tokenRes = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
     method: 'post', contentType: 'application/x-www-form-urlencoded',
     payload: 'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=' + jwt,
     muteHttpExceptions: true
   });
-  const tokenData = JSON.parse(tokenRes.getContentText() || '{}');
-  Logger.log('FCM token response: %s %s', tokenRes.getResponseCode(), JSON.stringify(tokenData).slice(0, 200));
-  return tokenData.access_token || null;
+  try {
+    const tokenData = JSON.parse(tokenRes.getContentText() || '{}');
+    Logger.log('FCM token response: %s %s', tokenRes.getResponseCode(), JSON.stringify(tokenData).slice(0, 200));
+    return tokenData.access_token || null;
+  } catch (e) {
+    Logger.log('FCM token parse error: %s response=%s', e.message, tokenRes.getContentText().slice(0, 200));
+    return null;
+  }
 }
 
 function sendPushNotification(fcmToken, title, body, data) {
