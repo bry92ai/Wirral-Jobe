@@ -2558,6 +2558,7 @@ function startOffer(jobId, pickupLat, pickupLng) {
   if (!driver) {
     Logger.log('startOffer: no queued driver found for job %s; moving to bid board', jobId);
     updateJob(jobId, { status: 'BIDDING', updated_at: new Date().toISOString() });
+    openBidWindow(jobId, pickupLat, pickupLng);
     writeAudit('system', '', 'offer_no_available_driver', 'job', jobId, { status: 'BIDDING' });
     notifyAvailableDrivers(findJobById(jobId), 'job_available', 'New job available');
     return;
@@ -2621,6 +2622,13 @@ function closeBidWindow(jobId, winnerId) {
   if (changed) writeAudit('system', '', 'bid_window_closed', 'job', jobId, { winnerId, bidsChanged: changed });
 }
 
+function openBidWindow(jobId, pickupLat, pickupLng) {
+  if (offerRowIndex(jobId) >= 0) return;
+  getOffersSheet().appendRow([jobId, BIDDING_COUNTDOWN_DRIVER, '[]', Date.now() + BID_WINDOW_MS, Number(pickupLat), Number(pickupLng)]);
+  setJobNotes(jobId, notes => { if (!notes.liveDispatchStartedAt) notes.liveDispatchStartedAt = new Date().toISOString(); });
+  writeAudit('system', '', 'bid_window_opened', 'job', jobId, { pickupLat: Number(pickupLat), pickupLng: Number(pickupLng) });
+}
+
 function advanceOffers() {
   const sheet = getOffersSheet();
   const offers = getOffers();
@@ -2651,6 +2659,7 @@ function advanceOffers() {
       if (!next) {
         sheet.deleteRow(idx);
         updateJob(offer.jobId, { status: 'BIDDING', updated_at: new Date().toISOString() });
+        openBidWindow(offer.jobId, Number(offer.pickupLat), Number(offer.pickupLng));
         writeAudit('system', '', 'offer_exhausted', 'job', offer.jobId, { status: 'BIDDING' });
         notifyAvailableDrivers(findJobById(offer.jobId), 'job_available', 'New job available');
       } else {
@@ -2740,8 +2749,8 @@ function declineOfferUnlocked(jobId, driverId) {
   if (!next) {
     sheet.deleteRow(idx);
     updateJob(jobId, { status: 'BIDDING', updated_at: new Date().toISOString() });
-    getOffersSheet().appendRow([jobId, BIDDING_COUNTDOWN_DRIVER, '[]', Date.now() + BID_WINDOW_MS, Number(row[4]), Number(row[5])]);
-    writeAudit('system', '', 'offer_exhausted', 'job', jobId, { status: 'BIDDING', bidWindow: '60s' });
+    openBidWindow(jobId, Number(row[4]), Number(row[5]));
+    writeAudit('system', '', 'offer_exhausted', 'job', jobId, { status: 'BIDDING' });
     notifyAvailableDrivers(findJobById(jobId), 'job_available', 'New job available');
   } else {
     offered.push(next.id);
@@ -2941,6 +2950,7 @@ function runScheduledTasks() {
     advanceFutureOffers();
     processFutureBookings();
     dispatchFutureBookings();
+    allocatePendingAsapJobs();
   });
   processScheduledCustomerSms();
 }
