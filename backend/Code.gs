@@ -2740,7 +2740,8 @@ function declineOfferUnlocked(jobId, driverId) {
   if (!next) {
     sheet.deleteRow(idx);
     updateJob(jobId, { status: 'BIDDING', updated_at: new Date().toISOString() });
-    writeAudit('system', '', 'offer_exhausted', 'job', jobId, { status: 'BIDDING' });
+    getOffersSheet().appendRow([jobId, BIDDING_COUNTDOWN_DRIVER, '[]', Date.now() + BID_WINDOW_MS, Number(row[4]), Number(row[5])]);
+    writeAudit('system', '', 'offer_exhausted', 'job', jobId, { status: 'BIDDING', bidWindow: '60s' });
     notifyAvailableDrivers(findJobById(jobId), 'job_available', 'New job available');
   } else {
     offered.push(next.id);
