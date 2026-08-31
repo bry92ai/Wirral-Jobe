@@ -512,7 +512,11 @@ export default function BookingPage() {
       setError('Please select a pickup and destination.');
       return;
     }
-    if (routeLoading || !route.valid || !Number.isFinite(route.miles) || route.miles <= 0) {
+    if (routeLoading) {
+      setError('The route is still being calculated. Please wait a moment.');
+      return;
+    }
+    if (!route.valid || !Number.isFinite(route.miles) || route.miles <= 0) {
       setError('A verified driving route is required before booking. Please wait or try the addresses again.');
       return;
     }
@@ -957,7 +961,7 @@ export default function BookingPage() {
               <div><strong>You're in safe hands</strong><small>Local drivers. Local knowledge.<br />Always on call.</small></div>
             </div>
             {error && <p className="error">{error}</p>}
-            <button onClick={submitBooking} disabled={loading} className="wj-details-submit">{loading ? 'Booking…' : 'Book now'} <b>›</b></button>
+            <button onClick={submitBooking} disabled={loading || routeLoading || !route.valid} className="wj-details-submit">{routeLoading ? 'Calculating route…' : loading ? 'Booking…' : 'Book now'} <b>›</b></button>
             <div className="wj-details-footer">▱ &nbsp; Safe &amp; secure &nbsp; | &nbsp; ♙ &nbsp; Local drivers &nbsp; | &nbsp; ♢ &nbsp; Fair prices</div>
           </div>
         );
