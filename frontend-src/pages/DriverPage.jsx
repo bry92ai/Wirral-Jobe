@@ -901,10 +901,10 @@ function DriverPageContent() {
 
     function sendLocation(lat, lng, zone, accuracy) {
       if (nativeLocationActive) return; // native DriverForegroundService already sends location updates
+      if (Date.now() - lastLocationUpdateRef.current < 2000) return; // throttle API sends to 2s
+      lastLocationUpdateRef.current = Date.now();
       api('driver/location', { lat, lng, zone, accuracy }, driverAuth())
-        .then(() => {
-          lastLocationUpdateRef.current = Date.now(); setLastLocationSentAt(Date.now());
-        })
+        .then(() => { setLastLocationSentAt(Date.now()); })
         .catch(err => {
           if (err && err.message) setLocationError('Location send failed: ' + err.message);
         });
@@ -1016,7 +1016,11 @@ function DriverPageContent() {
 
     refreshLocationRef.current = refreshLocation;
     refreshLocation();
-    const interval = setInterval(refreshLocation, 5000);
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => { if (mounted) handlePosition(position); },
+      (err) => { if (mounted) onGeoError(err); },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
     const fallbackTimeout = setTimeout(() => {
       if (!mounted || currentZoneIdRef.current) return;
       const profileZone = profileRef.current?.zone;
@@ -1027,7 +1031,7 @@ function DriverPageContent() {
     }, 30000);
     return () => {
       mounted = false;
-      clearInterval(interval);
+      navigator.geolocation.clearWatch(watchId);
       clearTimeout(fallbackTimeout);
     };
   }, [loggedIn, driverId]);

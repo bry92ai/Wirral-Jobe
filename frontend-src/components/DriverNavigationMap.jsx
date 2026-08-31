@@ -56,6 +56,7 @@ async function fetchRoute(origin, target) {
 function clearRouteLayer(map) {
   if (map.getLayer('driver-route-line')) map.removeLayer('driver-route-line');
   if (map.getLayer('driver-route-outline')) map.removeLayer('driver-route-outline');
+  if (map.getLayer('driver-route-casing')) map.removeLayer('driver-route-casing');
   if (map.getSource('driver-route')) map.removeSource('driver-route');
 }
 
@@ -66,8 +67,9 @@ function addRouteLayer(map, route) {
   if (source) source.setData(data);
   else {
     map.addSource('driver-route', { type: 'geojson', data });
-    map.addLayer({ id: 'driver-route-outline', type: 'line', source: 'driver-route', paint: { 'line-color': '#1f2937', 'line-width': 14, 'line-opacity': 0.9, 'line-cap': 'round', 'line-join': 'round' } });
-    map.addLayer({ id: 'driver-route-line', type: 'line', source: 'driver-route', paint: { 'line-color': '#f4bf1b', 'line-width': 8, 'line-opacity': 1, 'line-cap': 'round', 'line-join': 'round' } });
+    map.addLayer({ id: 'driver-route-casing', type: 'line', source: 'driver-route', paint: { 'line-color': '#111827', 'line-width': 20, 'line-opacity': 0.55, 'line-cap': 'round', 'line-join': 'round' } });
+    map.addLayer({ id: 'driver-route-outline', type: 'line', source: 'driver-route', paint: { 'line-color': '#4b5563', 'line-width': 14, 'line-opacity': 0.95, 'line-cap': 'round', 'line-join': 'round' } });
+    map.addLayer({ id: 'driver-route-line', type: 'line', source: 'driver-route', paint: { 'line-color': '#f4bf1b', 'line-width': 9, 'line-opacity': 1, 'line-cap': 'round', 'line-join': 'round' } });
   }
 }
 
@@ -149,7 +151,7 @@ export default function DriverNavigationMap({ myLocation, heading, activeJob, th
       driverMarkerRef.current?.setLngLat([location.lng, location.lat]);
       const icon = driverMarkerRef.current?.getElement().querySelector('.wj-navigation-taxi-icon');
       if (icon) icon.style.transform = `rotate(${currentHeading - map.getBearing()}deg)`;
-      if (follow) map.easeTo({ center: [location.lng, location.lat], zoom: Math.max(map.getZoom(), 17.5), bearing: currentHeading, pitch: 58, offset: [0, 190], duration, essential: true });
+      if (follow) map.easeTo({ center: [location.lng, location.lat], zoom: Math.max(map.getZoom(), 18.5), bearing: currentHeading, pitch: 62, offset: [0, 190], duration, essential: true });
       displayedLocationRef.current = location;
       displayedHeadingRef.current = currentHeading;
       if (progress < 1) animationRef.current = requestAnimationFrame(animate);
