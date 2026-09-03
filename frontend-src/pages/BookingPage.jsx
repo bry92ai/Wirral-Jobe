@@ -14,7 +14,12 @@ const Icon = {
   chev: () => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 6l6 6-6 6" /></svg>),
   search: () => (<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>),
   shield: () => (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2 4 5v6c0 5 3.4 9 8 11 4.6-2 8-6 8-11V5l-8-3z" /><path d="M9 12l2 2 4-4" /></svg>),
-  check: () => (<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6 9 17l-5-5" /></svg>)
+  check: () => (<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6 9 17l-5-5" /></svg>),
+  user: () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>),
+  phone: () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.63a2 2 0 0 1-.45 2.11L8 9.73a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.85.29 1.73.5 2.63.62A2 2 0 0 1 22 16.92z" /></svg>),
+  users: () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>),
+  accessibility: () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="4" r="2" /><path d="M5 8h14M12 6v8M8 22l4-8 4 8M7 13l5 1 5-1" /></svg>),
+  note: () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" /><path d="M8 8h8M8 12h5" /></svg>)
 };
 
 const DEFAULT_CENTER = { lat: 53.393, lng: -3.019 };
@@ -34,8 +39,9 @@ function newClientRequestId() {
 }
 
 function formatPhone(tel) {
-  const cleaned = String(tel || '').replace(/\s/g, '');
-  return cleaned.startsWith('0') ? `+44${cleaned.slice(1)}` : cleaned;
+  const cleaned = String(tel || '').replace(/\D/g, '');
+  if (cleaned.startsWith('44')) return `+${cleaned}`;
+  return cleaned.startsWith('0') ? `+44${cleaned.slice(1)}` : `+${cleaned}`;
 }
 
 async function googlePlaceSearch(query) {
@@ -139,7 +145,8 @@ function toIsoLocal(date) {
 export default function BookingPage() {
   const navigate = useNavigate();
 
-  function logout() {
+  async function logout() {
+    try { await api('customer/logout', { customerToken }); } catch (err) { console.error(err); }
     localStorage.removeItem('wirralCustomerToken');
     setCustomerToken('');
     setCustomerName('');
@@ -181,6 +188,7 @@ export default function BookingPage() {
   const [trackingJob, setTrackingJob] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [copiedJobId, setCopiedJobId] = useState('');
 
   const [isAirport, setIsAirport] = useState(false);
   const [airportTripType, setAirportTripType] = useState('single');
@@ -202,6 +210,11 @@ export default function BookingPage() {
       '',
       window.location.href
     );
+    setScreenState(nextScreen);
+  }
+
+  function replaceScreen(nextScreen) {
+    window.history.replaceState({ ...window.history.state, wirralBookingScreen: nextScreen }, '', window.location.href);
     setScreenState(nextScreen);
   }
 
@@ -228,7 +241,8 @@ export default function BookingPage() {
 
   useEffect(() => {
     const currentState = window.history.state;
-    const initialScreen = currentState?.wirralBookingScreen || 'home';
+    const storedScreen = currentState?.wirralBookingScreen;
+    const initialScreen = ['booking', 'success'].includes(storedScreen) ? 'home' : (storedScreen || 'home');
 
     if (!currentState?.wirralBookingScreen) {
       window.history.replaceState(
@@ -504,6 +518,11 @@ export default function BookingPage() {
       setError('Please enter the passenger’s name and a valid mobile number.');
       return;
     }
+    const vehicleCapacity = vehicleType === 'mpv' ? 8 : 4;
+    if (passengers > vehicleCapacity) {
+      setError(`The selected vehicle can carry up to ${vehicleCapacity} passengers.`);
+      return;
+    }
     if ((isFuture || isAirport) && (!pickupTime || new Date(pickupTime).getTime() <= Date.now())) {
       setError('Please choose a pickup time in the future.');
       return;
@@ -520,11 +539,12 @@ export default function BookingPage() {
       setError('A verified driving route is required before booking. Please wait or try the addresses again.');
       return;
     }
-    const requestFingerprint = JSON.stringify([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng, pickupTime, returnTrip?.time, vehicleType]);
+    const requestFingerprint = JSON.stringify([pickup.lat, pickup.lng, dropoff.lat, dropoff.lng, pickupTime, returnTrip?.time, vehicleType, passengers, luggage, flightNumber, childSeats, accessibility, customerNotes, bookingForSomeoneElse, passengerName, passengerPhone]);
     if (bookingRequestRef.current?.fingerprint !== requestFingerprint) bookingRequestRef.current = { fingerprint: requestFingerprint, id: newClientRequestId() };
     const clientRequestId = bookingRequestRef.current.id;
     setError('');
     setLoading(true);
+    navigateToScreen('booking');
     try {
       const booking = {
         pickupAddress: pickup.address,
@@ -552,16 +572,14 @@ export default function BookingPage() {
         const confirmed = await api('booking/confirm', { pendingBookingId: outbound.pendingBookingId });
         if (confirmed.error) throw new Error(confirmed.error);
         setResult({ ...outbound, ...confirmed, jobId: confirmed.jobId || outbound.pendingBookingId });
-        navigateToScreen('success');
+        replaceScreen('success');
       } else {
         const returnDate = new Date(returnTrip.time);
         const returnLocations = getReturnLocations();
         const returnPickup = returnLocations?.pickup;
         const returnDropoff = returnLocations?.dropoff;
         if (!returnPickup || !returnDropoff || returnPickup.lat == null || returnPickup.lng == null || returnDropoff.lat == null || returnDropoff.lng == null) {
-          setError('Return trip locations are incomplete.');
-          setLoading(false);
-          return;
+          throw new Error('Return trip locations are incomplete. Please review the journey and try again.');
         }
         if (!Number.isFinite(route.returnMiles) || route.returnMiles <= 0) throw new Error('A verified driving route is required for the return journey.');
         const returnBooking = {
@@ -593,13 +611,70 @@ export default function BookingPage() {
         if (confirmed.error) throw new Error(confirmed.error);
         setResult({ ...pair.outbound, jobId: confirmed.outboundJobId || pair.outbound.pendingBookingId });
         setReturnResult({ ...pair.return, jobId: confirmed.returnJobId || pair.return.pendingBookingId });
-        navigateToScreen('success');
+        replaceScreen('success');
       }
     } catch (err) {
-      setError(err.message || 'Booking failed. Please try again.');
+      setError(err.message || 'We could not complete your booking. Your details are still here, so please try again.');
+      window.history.replaceState(
+        { ...window.history.state, wirralBookingScreen: 'details' },
+        '',
+        window.location.href
+      );
+      setScreenState('details');
     } finally {
       setLoading(false);
     }
+  }
+
+  async function copyJobId(jobId) {
+    if (!jobId) return;
+    try {
+      await navigator.clipboard.writeText(String(jobId));
+      setCopiedJobId(String(jobId));
+      window.setTimeout(() => setCopiedJobId(''), 2000);
+    } catch {
+      const copyField = document.createElement('textarea');
+      copyField.value = String(jobId);
+      copyField.setAttribute('readonly', '');
+      copyField.style.position = 'fixed';
+      copyField.style.opacity = '0';
+      document.body.appendChild(copyField);
+      copyField.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(copyField);
+      if (copied) {
+        setCopiedJobId(String(jobId));
+        window.setTimeout(() => setCopiedJobId(''), 2000);
+      }
+    }
+  }
+
+  function bookAnotherRide() {
+    setResult(null);
+    setReturnResult(null);
+    setTrackingJob(null);
+    setCopiedJobId('');
+    setError('');
+    setLoading(false);
+    setDropoff({ address: '', lat: null, lng: null });
+    setRoute(current => ({ ...current, miles: 0, returnMiles: 0, valid: false }));
+    setReturnTrip(null);
+    setIsAirport(false);
+    setIsFuture(false);
+    setAirportTripType('single');
+    setFlightNumber('');
+    setCustomerNotes('');
+    setPassengers(1);
+    setLuggage(0);
+    setChildSeats('');
+    setAccessibility('');
+    setShowExtras(false);
+    setBookingForSomeoneElse(false);
+    setPassengerName('');
+    setPassengerPhone('');
+    setVehicleType('car');
+    bookingRequestRef.current = null;
+    navigateToScreen('home');
   }
 
   function changePickup() {
@@ -638,7 +713,7 @@ export default function BookingPage() {
   function vehicleCard(type, label, capacity, fare) {
     const selected = vehicleType === type;
     return (
-      <button key={type} type="button" onClick={() => setVehicleType(type)} className={`wj-ride-card${selected ? ' selected' : ''}`}>
+      <button key={type} type="button" onClick={() => { setVehicleType(type); setPassengers(current => Math.min(current, type === 'mpv' ? 8 : 4)); }} className={`wj-ride-card${selected ? ' selected' : ''}`}>
         <span className="wj-ride-check">{selected ? '✓' : ''}</span>
         <svg className="wj-ride-car" viewBox="0 0 64 48" fill="none" aria-hidden="true">
           {type === 'mpv' ? (
@@ -882,150 +957,126 @@ export default function BookingPage() {
       case 'details':
         return (
           <div className="wj-details-screen">
-            <div className="wj-details-topbar">
-              {backBtn(goBack)}
-              {futureTag()}
+            <div className="wj-details-customer-card">
+              <span className="wj-icon-circle"><Icon.user /></span>
+              <div><strong>Hi, {customerName || 'there'}</strong><small>Glad to have you back.</small></div>
+              <button type="button" onClick={logout}>Log out</button>
             </div>
+            <div className="wj-details-topbar">{backBtn(goBack)}{futureTag()}</div>
             <img src={logo} alt="The Wirral Jobe" className="wj-details-logo" />
-            <h1 className="wj-details-title">Your details</h1>
+            <h1 className="wj-details-title"><span>Your</span> details</h1>
             <p className="wj-details-subtitle">Just a few details to confirm your booking.</p>
-            <div className="wj-details-input">
-              <span aria-hidden="true">♟</span>
-              <input type="text" value={customerName} disabled placeholder="Your name" />
-            </div>
-            <div className="wj-details-input">
-              <span aria-hidden="true">●</span>
-              <input type="tel" value={customerPhone} disabled placeholder="Mobile number" />
-            </div>
-            <div className="wj-passenger-label">Passengers</div>
-            <div className="wj-passenger-picker">
-              <button type="button" aria-label="Remove passenger" onClick={() => setPassengers(Math.max(1, passengers - 1))}>−</button>
-              <div><strong>{passengers}</strong><small>Up to {vehicleType === 'mpv' ? 8 : 4} passengers</small></div>
-              <button type="button" aria-label="Add passenger" onClick={() => setPassengers(Math.min(vehicleType === 'mpv' ? 8 : 4, passengers + 1))}>+</button>
-            </div>
-            {isAirport && (<>
-            <div className="wj-passenger-label">Luggage</div>
-            <div className="wj-passenger-picker">
-              <button type="button" aria-label="Remove luggage" onClick={() => setLuggage(Math.max(0, luggage - 1))}>−</button>
-              <div><strong>{luggage}</strong><small>Number of bags</small></div>
-              <button type="button" aria-label="Add luggage" onClick={() => setLuggage(luggage + 1)}>+</button>
-            </div>
-            <div className="wj-details-input">
-              <span aria-hidden="true">✈</span>
-              <input type="text" value={flightNumber} onChange={e => setFlightNumber(e.target.value)} placeholder="Flight number (if any)" />
-            </div>
-            </>)}
-            {!showExtras ? (
-              <button type="button" onClick={() => setShowExtras(true)} className="wj-text-button">+ Add child seat or accessibility needs</button>
-            ) : (
-              <>
-                <div className="wj-details-input">
-                  <span aria-hidden="true">♥</span>
-                  <input type="text" value={childSeats} onChange={e => setChildSeats(e.target.value)} placeholder="Child seats required?" />
-                </div>
-                <div className="wj-details-input">
-                  <span aria-hidden="true">♿</span>
-                  <input type="text" value={accessibility} onChange={e => setAccessibility(e.target.value)} placeholder="Accessibility needs" />
-                </div>
-                <button type="button" onClick={() => { setShowExtras(false); setChildSeats(''); setAccessibility(''); }} className="wj-text-button">− Remove special requirements</button>
-              </>
-            )}
-            <textarea className="wj-details-input" style={{ minHeight: 80, paddingTop: 12 }} value={customerNotes} onChange={e => setCustomerNotes(e.target.value)} placeholder="Any other notes for the driver" />
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.5rem 0', fontSize: '0.95rem', cursor: 'pointer' }}>
-              <input type="checkbox" checked={bookingForSomeoneElse} onChange={e => setBookingForSomeoneElse(e.target.checked)} />
-              I'm booking this journey for someone else
-            </label>
-            {bookingForSomeoneElse && (
-              <>
-                <div className="wj-details-input">
-                  <span aria-hidden="true">👤</span>
-                  <input type="text" value={passengerName} onChange={e => setPassengerName(e.target.value)} placeholder="Passenger name" />
-                </div>
-                <div className="wj-details-input">
-                  <span aria-hidden="true">📞</span>
-                  <input type="tel" value={passengerPhone} onChange={e => setPassengerPhone(e.target.value)} placeholder="Passenger mobile number" />
-                </div>
-              </>
-            )}
-            {isFuture && (
-              <input className="wj-details-datetime" type="datetime-local" value={pickupTime} min={toIsoLocal(new Date())} onChange={e => setPickupTime(e.target.value)} />
-            )}
-            <div className="wj-info-grid" style={{ gridTemplateColumns: '1fr', margin: '1rem 0' }}>
-              <div><small>Pickup</small><strong>{pickup.address}</strong></div>
-              <div><small>Destination</small><strong>{dropoff.address}</strong></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}><span><small>Vehicle</small><strong>{vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</strong></span><span style={{ textAlign: 'right' }}><small>Estimated fare</small><strong>{formatCurrency(vehicleType === 'mpv' ? mpvFare : carFare)}</strong></span></div>
-              <small style={{ color: 'var(--cream-dim)' }}>Nothing to pay now. Pay your driver at the end of the journey.</small>
-            </div>
-            <div className="wj-details-safety">
-              <span><Icon.shield /></span>
-              <div><strong>You're in safe hands</strong><small>Local drivers. Local knowledge.<br />Always on call.</small></div>
-            </div>
+
+            <section className="wj-premium-card wj-personal-card">
+              <div className="wj-information-row"><span className="wj-icon-circle"><Icon.user /></span><div><small>Full name</small><strong>{customerName}</strong></div><i><Icon.check /></i></div>
+              <div className="wj-information-row"><span className="wj-icon-circle"><Icon.phone /></span><div><small>Phone number</small><strong>{customerPhone}</strong></div><i><Icon.check /></i></div>
+            </section>
+
+            <section className="wj-premium-card wj-booking-options-card">
+              <div className="wj-compact-counter">
+                <span className="wj-icon-circle"><Icon.users /></span>
+                <div><strong>Passengers</strong><small>Up to {vehicleType === 'mpv' ? 8 : 4} passengers</small></div>
+                <div className="wj-counter-actions"><button type="button" aria-label="Remove passenger" onClick={() => setPassengers(Math.max(1, passengers - 1))}>−</button><b>{passengers}</b><button type="button" aria-label="Add passenger" onClick={() => setPassengers(Math.min(vehicleType === 'mpv' ? 8 : 4, passengers + 1))}>+</button></div>
+              </div>
+              {isAirport && <>
+                <div className="wj-compact-counter"><span className="wj-icon-circle"><Icon.briefcase /></span><div><strong>Luggage</strong><small>Number of bags</small></div><div className="wj-counter-actions"><button type="button" onClick={() => setLuggage(Math.max(0, luggage - 1))}>−</button><b>{luggage}</b><button type="button" onClick={() => setLuggage(luggage + 1)}>+</button></div></div>
+                <div className="wj-compact-field"><Icon.plane /><input type="text" value={flightNumber} onChange={e => setFlightNumber(e.target.value)} placeholder="Flight number (if any)" /></div>
+              </>}
+              <button type="button" onClick={() => setShowExtras(value => !value)} className="wj-details-link"><Icon.accessibility /><span>{showExtras ? 'Remove special requirements' : 'Add child seat or accessibility needs'}</span><b>›</b></button>
+              {showExtras && <div className="wj-details-expanded-fields"><input type="text" value={childSeats} onChange={e => setChildSeats(e.target.value)} placeholder="Child seats required?" /><input type="text" value={accessibility} onChange={e => setAccessibility(e.target.value)} placeholder="Accessibility needs" /></div>}
+            </section>
+
+            <label className="wj-premium-card wj-notes-card"><span className="wj-icon-circle"><Icon.note /></span><span><small>Any other notes for the driver</small><textarea value={customerNotes} onChange={e => setCustomerNotes(e.target.value)} placeholder="Add notes (optional)" /></span></label>
+            <label className={`wj-premium-card wj-someone-else${bookingForSomeoneElse ? ' selected' : ''}`}><input type="checkbox" checked={bookingForSomeoneElse} onChange={e => setBookingForSomeoneElse(e.target.checked)} /><span><strong>I'm booking this journey for someone else</strong><small>We'll make sure everything is taken care of.</small></span></label>
+            {bookingForSomeoneElse && <div className="wj-details-expanded-fields wj-premium-card"><input type="text" value={passengerName} onChange={e => setPassengerName(e.target.value)} placeholder="Passenger name" /><input type="tel" value={passengerPhone} onChange={e => setPassengerPhone(e.target.value)} placeholder="Passenger mobile number" /></div>}
+            {isFuture && <input className="wj-details-datetime" type="datetime-local" value={pickupTime} min={toIsoLocal(new Date())} onChange={e => setPickupTime(e.target.value)} />}
+
+            <section className="wj-premium-card wj-journey-summary">
+              <div className="wj-journey-route"><div><i className="pickup"><Icon.pin /></i><span><small>Pickup</small><strong>{pickup.address}</strong></span></div><div><i className="destination">◆</i><span><small>Destination</small><strong>{dropoff.address}</strong></span></div><div><i><Icon.home /></i><span><small>Vehicle</small><strong>{vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</strong></span></div></div>
+              <div className="wj-journey-fare"><small>Estimated fare</small><strong>{formatCurrency(vehicleType === 'mpv' ? mpvFare : carFare)}</strong></div>
+            </section>
+            <p className="wj-payment-reassurance">ⓘ Nothing to pay now. Pay your driver at the end of the journey.</p>
+            <div className="wj-details-safety"><span><Icon.shield /></span><div><strong>You're in safe hands</strong><small>Local drivers. Local knowledge. Always on call.</small></div></div>
             {error && <p className="error">{error}</p>}
-            <button onClick={submitBooking} disabled={loading || routeLoading || !route.valid} className="wj-details-submit">{routeLoading ? 'Calculating route…' : loading ? 'Booking…' : 'Book now'} <b>›</b></button>
-            <div className="wj-details-footer">▱ &nbsp; Safe &amp; secure &nbsp; | &nbsp; ♙ &nbsp; Local drivers &nbsp; | &nbsp; ♢ &nbsp; Fair prices</div>
+            <button onClick={submitBooking} disabled={loading || routeLoading || !route.valid} className="wj-details-submit">{routeLoading ? 'Calculating route…' : loading ? 'Booking…' : 'Book now'} <b>→</b></button>
+            <div className="wj-details-footer"><span><Icon.shield /> Safe &amp; secure</span><span><Icon.users /> Local drivers</span><span><Icon.check /> Fair prices</span></div>
           </div>
         );
 
-      case 'success':
-        const allocated = Boolean(trackingJob?.driverId) && ['ASSIGNED', 'ON_WAY', 'ARRIVED', 'POB', 'COMPLETE'].includes(trackingJob.status);
+      case 'booking':
+        return (
+          <div className="wj-booking-progress" role="status" aria-live="polite">
+            <img src={logo} alt="The Wirral Jobe" className="wj-details-logo" />
+            <div className="wj-booking-progress-mark" aria-hidden="true"><span><Icon.home /></span></div>
+            <h1 className="wj-details-title"><span>Booking</span> your ride…</h1>
+            <p className="wj-details-subtitle">This usually takes a few seconds.<br />Please don't close the app.</p>
+            <section className="wj-premium-card wj-processing-summary">
+              <div className="wj-journey-route"><div><i className="pickup"><Icon.pin /></i><span><small>Pickup</small><strong>{pickup.address}</strong></span></div><div><i className="destination">◆</i><span><small>Destination</small><strong>{dropoff.address}</strong></span></div><div><i><Icon.home /></i><span><small>Vehicle</small><strong>{vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</strong></span></div></div>
+              <div className="wj-processing-meta"><span><small>Passengers</small><strong>{passengers}</strong></span><span><small>Estimated fare</small><strong>{formatCurrency(vehicleType === 'mpv' ? mpvFare : carFare)}</strong></span></div>
+            </section>
+            <div className="wj-details-safety"><span><Icon.shield /></span><div><strong>You're in safe hands</strong><small>Local drivers. Local knowledge. Always on call.</small></div></div>
+            <button type="button" className="wj-details-submit wj-processing-button" disabled><i /> Booking…</button>
+            <div className="wj-details-footer"><span><Icon.shield /> Safe &amp; secure</span><span><Icon.users /> Local drivers</span><span><Icon.check /> Fair prices</span></div>
+          </div>
+        );
+
+      case 'success': {
+        const status = trackingJob?.status || (isFuture ? 'SCHEDULED' : 'NEW');
+        const statuses = ['NEW', 'ASSIGNED', 'ON_WAY', 'ARRIVED', 'POB', 'COMPLETE'];
+        const currentStep = status === 'SCHEDULED' ? 0 : statuses.indexOf(status);
+        const timeline = [
+          { status: isFuture ? 'SCHEDULED' : 'NEW', title: isFuture ? 'Journey scheduled' : 'Allocating driver', copy: isFuture ? 'Your booking is confirmed for the selected time.' : 'We’re finding the best local driver for you.' },
+          { status: 'ASSIGNED', title: 'Driver assigned', copy: 'Your driver’s details will appear here.' },
+          { status: 'ON_WAY', title: 'Driver on the way', copy: 'Your driver is heading to the pickup.' },
+          { status: 'ARRIVED', title: 'Driver arrived', copy: 'Your driver is waiting at the pickup.' },
+          { status: 'POB', title: 'Journey in progress', copy: 'You’re on the way to your destination.' },
+          { status: 'COMPLETE', title: 'Journey complete', copy: 'Thank you for choosing The Wirral Jobe.' }
+        ];
         const trackingLabel = {
-          NEW: 'Finding a driver',
+          SCHEDULED: 'Journey scheduled',
+          NEW: isFuture ? 'Journey scheduled' : 'Finding your driver',
           ASSIGNED: 'Driver assigned',
           ON_WAY: 'Driver on the way',
           ARRIVED: 'Driver has arrived',
           POB: 'Journey in progress',
           COMPLETE: 'Journey complete',
           CANCELLED: 'Booking cancelled'
-        }[trackingJob?.status] || (isFuture ? 'Booking confirmed' : 'Finding a driver…');
+        }[status] || 'Booking confirmed';
         return (
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ width: 60, height: 60, borderRadius: '50%', border: '2px solid var(--green)', color: 'var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.1rem' }}><Icon.check /></div>
-            {panelTitle('Booking confirmed')}
-            <p style={{ color: 'var(--cream-dim)', fontSize: '0.9rem', margin: '0 0 1rem' }}>
-              {isAirport && airportTripType === 'return'
-                ? 'Both legs of your airport transfer are booked.'
-                : (isFuture
-                    ? `Your ${vehicleType === 'mpv' ? 'MPV' : 'estate car'} is booked for ${new Date(pickupTime).toLocaleString()}.`
-                    : (allocated
-                        ? <><span style={{ color: 'var(--green)', fontWeight: 800 }}>{trackingLabel}</span><br />{trackingJob.driverId && `Driver ${trackingJob.driverId}`}{trackingJob.driverLocationAt && <small style={{ display: 'block', marginTop: 4, color: 'var(--cream-dim)' }}>Location updated {new Date(trackingJob.driverLocationAt).toLocaleTimeString()}</small>}</>
-                        : 'We are allocating a driver now.'))}
-            </p>
-            {result && !isFuture && allocated && (
-              <button
-                onClick={() => navigate(`/track/${result.trackingToken}`)}
-                className="btn btn-primary"
-                style={{ marginBottom: '1rem' }}
-              >
-                Track your driver live
-              </button>
-            )}
-            {result && (
-              <div className="wj-info-grid" style={{ textAlign: 'left', gridTemplateColumns: '1fr' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--cream-dim)' }}>{returnResult ? 'Outbound job ID' : 'Job ID'}</span>
-                  <span style={{ fontWeight: 800 }}>{result.jobId}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--cream-dim)' }}>{returnResult ? 'Outbound fare' : 'Fare estimate'}</span>
-                  <span style={{ fontWeight: 800 }}>{formatCurrency(result.fare)}</span>
-                </div>
+          <div className="wj-success-screen" style={{ textAlign: 'center' }}>
+            <img src={logo} alt="The Wirral Jobe" className="wj-details-logo" />
+            <div className="wj-success-check"><Icon.check /></div>
+            <p className="wj-success-kicker">The Wirral Jobe</p>
+            <h1 className="wj-details-title"><span>Booking</span> confirmed</h1>
+            <p className="wj-details-subtitle">{isAirport && returnResult ? 'Both legs of your airport transfer are confirmed.' : isFuture ? `Your ${vehicleType === 'mpv' ? 'MPV' : 'saloon/estate'} is booked for ${new Date(pickupTime).toLocaleString()}.` : trackingLabel}</p>
+
+            <section className={`wj-premium-card wj-booking-status-card${status === 'CANCELLED' ? ' cancelled' : ''}`}>
+              <strong>{status === 'CANCELLED' ? 'Booking cancelled' : 'What happens next'}</strong>
+              <div className="wj-status-timeline" aria-label={`Booking status: ${trackingLabel}`}>
+                {timeline.map((step, index) => {
+                  const active = status !== 'CANCELLED' && currentStep === index;
+                  const complete = status !== 'CANCELLED' && currentStep > index;
+                  return <div key={step.status} className={`wj-status-step${active ? ' active' : ''}${complete ? ' complete' : ''}`}><i>{complete ? '✓' : index + 1}</i><span><b>{step.title}</b><small>{step.copy}</small></span></div>;
+                })}
               </div>
-            )}
-            {returnResult && (
-              <div className="wj-info-grid" style={{ textAlign: 'left', gridTemplateColumns: '1fr' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--cream-dim)' }}>Return job ID</span>
-                  <span style={{ fontWeight: 800 }}>{returnResult.jobId}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--cream-dim)' }}>Return fare</span>
-                  <span style={{ fontWeight: 800 }}>{formatCurrency(returnResult.fare)}</span>
-                </div>
-              </div>
-            )}
-            <button onClick={() => window.location.reload()} className="btn btn-primary">Book another ride</button>
+              {trackingJob?.driverId && <p className="wj-payment-reassurance">Driver {trackingJob.driverId}{trackingJob.driverLocationAt ? ` · Updated ${new Date(trackingJob.driverLocationAt).toLocaleTimeString()}` : ''}</p>}
+            </section>
+
+            {result?.trackingToken && <button onClick={() => navigate(`/track/${result.trackingToken}`)} className="btn btn-primary wj-track-booking">Track Booking</button>}
+
+            {[{ booking: result, label: returnResult ? 'Outbound job ID' : 'Job ID' }, ...(returnResult ? [{ booking: returnResult, label: 'Return job ID' }] : [])].map(({ booking, label }) => booking && (
+              <section key={label} className="wj-premium-card wj-confirmation-reference">
+                <small>{label}</small>
+                <div><strong>{booking.jobId}</strong><button type="button" className="wj-text-button" onClick={() => copyJobId(booking.jobId)}>{copiedJobId === String(booking.jobId) ? 'Copied' : 'Copy'}</button></div>
+                <p><span>Estimated fare</span><b>{formatCurrency(booking.fare)}</b></p>
+              </section>
+            ))}
+
+            <button onClick={bookAnotherRide} className="btn btn-outline wj-book-another">Book Another Ride</button>
+            <div className="wj-details-footer"><span><Icon.shield /> Secure booking</span><span><Icon.users /> Local drivers</span><span><Icon.check /> Fair prices</span></div>
           </div>
         );
+      }
 
       default:
         return null;
@@ -1035,7 +1086,8 @@ export default function BookingPage() {
   return (
     <div className="wj-shell">
       <div className={`wj-frame wj-booking-frame wj-screen-${screen}`}>
-        {customerToken && (
+        <nav className="wj-customer-topnav"><button type="button" className="active" onClick={() => navigate('/')}>Book</button><button type="button" onClick={() => navigate('/driver')}>Driver</button></nav>
+        {customerToken && screen !== 'details' && (
           <div className="wj-booking-userbar">
             <span>Hi, <strong>{customerName || 'guest'}</strong></span>
             <button type="button" className="wj-text-button" onClick={logout}>Log out</button>

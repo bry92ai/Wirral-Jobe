@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import logo from '../assets/logo.jpg';
 
@@ -12,12 +12,12 @@ function dateLabel(value) {
 }
 
 export default function CustomerPage() {
-  const navigate = useNavigate();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [pin, setPin] = useState('');
+  const [showPin, setShowPin] = useState(false);
   const [confirmPin, setConfirmPin] = useState('');
   const [forgotOtp, setForgotOtp] = useState('');
   const [forgotPin, setForgotPin] = useState('');
@@ -47,10 +47,6 @@ export default function CustomerPage() {
     if (token()) loadDashboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (customer) navigate('/', { replace: true });
-  }, [customer, navigate]);
 
   function resetForm() {
     setName(''); setPhone(''); setEmail(''); setOtp(''); setPin(''); setConfirmPin('');
@@ -237,11 +233,11 @@ export default function CustomerPage() {
   const CANCEL_REASONS = ['Plans changed', 'Booked accidentally', 'No longer travelling', 'Driver taking too long', 'Other'];
 
   if (!customer) {
-    return <div className="wj-shell"><div className="wj-frame wj-customer-auth">
-      <img src={logo} alt="The Wirral Jobe" className="wj-logo wj-logo-alive" />
-      <div className="wj-test-build">Test build 3.7</div>
-      <div className="wj-customer-kicker">Customer portal</div>
-      <h1 className="wj-title">
+    return <div className="wj-shell wj-obsidian-shell"><div className="wj-frame wj-gilt-frame wj-customer-auth wj-auth-chamber">
+      <nav className="wj-customer-topnav"><Link className="active" to="/">Book</Link><Link to="/driver">Driver</Link></nav>
+      <img src={logo} alt="The Wirral Jobe" className="wj-logo wj-logo-alive wj-gold-logo wj-logo-float" />
+      <div className="wj-customer-kicker wj-portal-eyebrow">Customer portal</div>
+      <h1 className="wj-title wj-gold-display">
         {authStep === 'login' && 'Log in'}
         {authStep === 'register-details' && 'Create account'}
         {authStep === 'register-otp' && 'Verify your number'}
@@ -250,7 +246,7 @@ export default function CustomerPage() {
         {authStep === 'forgot' && 'Reset your PIN'}
         {authStep === 'forgot-otp' && 'Choose a new PIN'}
       </h1>
-      <p className="wj-subtitle">
+      <p className="wj-subtitle wj-champagne-subtitle">
         {authStep === 'login' && 'Use your mobile number and PIN to manage your bookings.'}
         {authStep === 'register-details' && 'Enter your details and we will text you a verification code.'}
         {authStep === 'register-otp' && 'Enter the 6-digit code we sent to your mobile.'}
@@ -260,83 +256,83 @@ export default function CustomerPage() {
         {authStep === 'forgot-otp' && 'Enter the code we sent you and set a new 6-digit PIN.'}
       </p>
 
-      {authStep === 'login' && <form onSubmit={submitAuth}>
-        <div className="form-group"><label>Mobile number</label><input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="07700 123456" autoFocus required /></div>
-        <div className="form-group"><label>PIN</label><input inputMode="numeric" pattern="[0-9]{6}" type="password" value={pin} onChange={e => setPin(e.target.value)} placeholder="6-digit PIN" required /></div>
-        {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
-        <button className="btn btn-primary" disabled={loading}>{loading ? 'Please wait…' : 'Log in'}</button>
-        <div style={{ marginTop: 24, textAlign: 'center' }}>
-          <p style={{ marginBottom: 8, color: 'var(--muted)' }}>First time here?</p>
-          <button type="button" className="btn btn-outline" onClick={() => switchMode('register-details')} disabled={loading} style={{ width: '100%' }}>Create an account</button>
+      {authStep === 'login' && <form className="wj-auth-form wj-login-form" onSubmit={submitAuth}>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Mobile number</label><input className="wj-obsidian-input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="07700 123456" autoFocus required /></div>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">PIN</label><div className="wj-password-field"><input className="wj-obsidian-input" inputMode="numeric" pattern="[0-9]{6}" type={showPin ? 'text' : 'password'} value={pin} onChange={e => setPin(e.target.value)} placeholder="6-digit PIN" required /><button type="button" onClick={() => setShowPin(value => !value)} aria-label={showPin ? 'Hide PIN' : 'Show PIN'}>{showPin ? 'Hide' : 'Show'}</button></div></div>
+        {error && <p className="error wj-alert-error">{error}</p>}{message && <p className="success wj-alert-success">{message}</p>}
+        <button className="btn btn-primary wj-gold-cta" disabled={loading}>{loading ? 'Please wait…' : 'Log in'}</button>
+        <div className="wj-auth-switch" style={{ marginTop: 24, textAlign: 'center' }}>
+          <p className="wj-auth-switch-text" style={{ marginBottom: 8, color: 'var(--muted)' }}>First time here?</p>
+          <button type="button" className="btn btn-outline wj-champagne-ghost" onClick={() => switchMode('register-details')} disabled={loading} style={{ width: '100%' }}>Create an account</button>
         </div>
-        <div className="wj-customer-links" style={{ marginTop: 16 }}>
-          <button type="button" className="wj-text-button" onClick={() => switchMode('forgot')} disabled={loading}>Forgot PIN? Text me a new one</button>
-          <Link to="/" className="wj-portal-back">← Back to booking</Link>
-        </div>
-      </form>}
-
-      {authStep === 'register-details' && <form onSubmit={requestRegisterOtp}>
-        <div className="form-group"><label>Your name</label><input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoFocus required /></div>
-        <div className="form-group"><label>Mobile number</label><input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="07700 123456" required /></div>
-        <div className="form-group"><label>Email address (optional)</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" /></div>
-        {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
-        <button className="btn btn-primary" disabled={loading}>{loading ? 'Please wait…' : 'Send verification code'}</button>
-        <div className="wj-customer-links" style={{ marginTop: 12 }}>
-          <button type="button" className="wj-text-button" onClick={() => switchMode('login')} disabled={loading}>Already registered? Log in</button>
-          <Link to="/" className="wj-portal-back">← Back to booking</Link>
+        <div className="wj-customer-links wj-auth-footer" style={{ marginTop: 16 }}>
+          <button type="button" className="wj-text-button wj-gold-link" onClick={() => switchMode('forgot')} disabled={loading}>Forgot PIN? Text me a new one</button>
+          <Link to="/" className="wj-portal-back wj-portal-return">← Back to booking</Link>
         </div>
       </form>}
 
-      {authStep === 'register-otp' && <form onSubmit={continueToPin}>
-        <div className="form-group"><label>Verification code</label><input inputMode="numeric" pattern="[0-9]{6}" value={otp} onChange={e => setOtp(e.target.value)} placeholder="6-digit code" autoFocus required /></div>
-        {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
-        <button className="btn btn-primary" disabled={loading || otp.length !== 6}>{loading ? 'Please wait…' : 'Continue'}</button>
-        <div className="wj-customer-links" style={{ marginTop: 12 }}>
-          <button type="button" className="wj-text-button" onClick={() => switchMode('login')} disabled={loading}>Already registered? Log in</button>
-          <Link to="/" className="wj-portal-back">← Back to booking</Link>
+      {authStep === 'register-details' && <form className="wj-auth-form wj-register-form" onSubmit={requestRegisterOtp}>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Your name</label><input className="wj-obsidian-input" value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoFocus required /></div>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Mobile number</label><input className="wj-obsidian-input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="07700 123456" required /></div>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Email address (optional)</label><input className="wj-obsidian-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" /></div>
+        {error && <p className="error wj-alert-error">{error}</p>}{message && <p className="success wj-alert-success">{message}</p>}
+        <button className="btn btn-primary wj-gold-cta" disabled={loading}>{loading ? 'Please wait…' : 'Send verification code'}</button>
+        <div className="wj-customer-links wj-auth-footer" style={{ marginTop: 12 }}>
+          <button type="button" className="wj-text-button wj-gold-link" onClick={() => switchMode('login')} disabled={loading}>Already registered? Log in</button>
+          <Link to="/" className="wj-portal-back wj-portal-return">← Back to booking</Link>
         </div>
       </form>}
 
-      {authStep === 'register-pin' && <form onSubmit={continueToPlaces}>
-        <div className="form-group"><label>Create a 6-digit PIN</label><input inputMode="numeric" pattern="[0-9]{6}" type="password" value={pin} onChange={e => setPin(e.target.value)} placeholder="6-digit PIN" autoFocus required /></div>
-        <div className="form-group"><label>Confirm PIN</label><input inputMode="numeric" pattern="[0-9]{6}" type="password" value={confirmPin} onChange={e => setConfirmPin(e.target.value)} placeholder="Re-enter PIN" required /></div>
-        {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
-        <button className="btn btn-primary" disabled={loading}>{loading ? 'Please wait…' : 'Continue'}</button>
+      {authStep === 'register-otp' && <form className="wj-auth-form wj-otp-form" onSubmit={continueToPin}>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Verification code</label><input className="wj-obsidian-input" inputMode="numeric" pattern="[0-9]{6}" value={otp} onChange={e => setOtp(e.target.value)} placeholder="6-digit code" autoFocus required /></div>
+        {error && <p className="error wj-alert-error">{error}</p>}{message && <p className="success wj-alert-success">{message}</p>}
+        <button className="btn btn-primary wj-gold-cta" disabled={loading || otp.length !== 6}>{loading ? 'Please wait…' : 'Continue'}</button>
+        <div className="wj-customer-links wj-auth-footer" style={{ marginTop: 12 }}>
+          <button type="button" className="wj-text-button wj-gold-link" onClick={() => switchMode('login')} disabled={loading}>Already registered? Log in</button>
+          <Link to="/" className="wj-portal-back wj-portal-return">← Back to booking</Link>
+        </div>
       </form>}
 
-      {authStep === 'register-places' && <form onSubmit={finishRegistration}>
-        {registerPlaces.length > 0 && <div className="wj-saved-places" style={{ marginBottom: 16 }}>
-          {registerPlaces.map((p, i) => <article key={i}><span>{p.type === 'pickup' ? '↑' : '↓'}</span><div><strong>{p.label}</strong><small>{p.address}</small></div><button type="button" onClick={() => setRegisterPlaces(prev => prev.filter((_, idx) => idx !== i))} aria-label={`Remove ${p.label}`}>×</button></article>)}
+      {authStep === 'register-pin' && <form className="wj-auth-form wj-pin-form" onSubmit={continueToPlaces}>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Create a 6-digit PIN</label><input className="wj-obsidian-input" inputMode="numeric" pattern="[0-9]{6}" type="password" value={pin} onChange={e => setPin(e.target.value)} placeholder="6-digit PIN" autoFocus required /></div>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Confirm PIN</label><input className="wj-obsidian-input" inputMode="numeric" pattern="[0-9]{6}" type="password" value={confirmPin} onChange={e => setConfirmPin(e.target.value)} placeholder="Re-enter PIN" required /></div>
+        {error && <p className="error wj-alert-error">{error}</p>}{message && <p className="success wj-alert-success">{message}</p>}
+        <button className="btn btn-primary wj-gold-cta" disabled={loading}>{loading ? 'Please wait…' : 'Continue'}</button>
+      </form>}
+
+      {authStep === 'register-places' && <form className="wj-auth-form wj-places-form" onSubmit={finishRegistration}>
+        {registerPlaces.length > 0 && <div className="wj-saved-places wj-place-gallery" style={{ marginBottom: 16 }}>
+          {registerPlaces.map((p, i) => <article className="wj-place-card wj-auth-place-card" key={i}><span className="wj-place-arrow">{p.type === 'pickup' ? '↑' : '↓'}</span><div className="wj-place-copy"><strong>{p.label}</strong><small>{p.address}</small></div><button className="wj-place-remove" type="button" onClick={() => setRegisterPlaces(prev => prev.filter((_, idx) => idx !== i))} aria-label={`Remove ${p.label}`}>×</button></article>)}
         </div>}
-        <div className="form-group"><label>Place name</label><input value={placeForm.label} onChange={e => setPlaceForm({ ...placeForm, label: e.target.value })} placeholder="e.g. Home" /></div>
-        <div className="form-group"><label>Address</label><input value={placeForm.address} onChange={e => setPlaceForm({ ...placeForm, address: e.target.value })} placeholder="Full address" /></div>
-        <div className="wj-place-coordinates"><div className="form-group"><label>Latitude</label><input type="number" step="any" value={placeForm.lat} onChange={e => setPlaceForm({ ...placeForm, lat: e.target.value })} placeholder="53.39" /></div><div className="form-group"><label>Longitude</label><input type="number" step="any" value={placeForm.lng} onChange={e => setPlaceForm({ ...placeForm, lng: e.target.value })} placeholder="-3.02" /></div></div>
-        <div className="wj-place-type"><button type="button" className={placeForm.type === 'pickup' ? 'active' : ''} onClick={() => setPlaceForm({ ...placeForm, type: 'pickup' })}>Pickup</button><button type="button" className={placeForm.type === 'dropoff' ? 'active' : ''} onClick={() => setPlaceForm({ ...placeForm, type: 'dropoff' })}>Drop-off</button></div>
-        <button type="button" className="btn btn-outline" disabled={loading} onClick={addRegisterPlace} style={{ marginBottom: 12 }}>Add another place</button>
-        {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
-        <button className="btn btn-primary" disabled={loading}>{loading ? 'Please wait…' : 'Finish & create account'}</button>
-        <p style={{ textAlign: 'center', marginTop: 8 }}><button type="button" className="wj-text-button" onClick={finishRegistration} disabled={loading}>Skip this step</button></p>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Place name</label><input className="wj-obsidian-input" value={placeForm.label} onChange={e => setPlaceForm({ ...placeForm, label: e.target.value })} placeholder="e.g. Home" /></div>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Address</label><input className="wj-obsidian-input" value={placeForm.address} onChange={e => setPlaceForm({ ...placeForm, address: e.target.value })} placeholder="Full address" /></div>
+        <div className="wj-place-coordinates wj-coordinates-row"><div className="form-group wj-gilt-field"><label className="wj-gold-label">Latitude</label><input className="wj-obsidian-input" type="number" step="any" value={placeForm.lat} onChange={e => setPlaceForm({ ...placeForm, lat: e.target.value })} placeholder="53.39" /></div><div className="form-group wj-gilt-field"><label className="wj-gold-label">Longitude</label><input className="wj-obsidian-input" type="number" step="any" value={placeForm.lng} onChange={e => setPlaceForm({ ...placeForm, lng: e.target.value })} placeholder="-3.02" /></div></div>
+        <div className="wj-place-type wj-place-type-toggle"><button type="button" className={`${placeForm.type === 'pickup' ? 'active' : ''} wj-place-type-btn`} onClick={() => setPlaceForm({ ...placeForm, type: 'pickup' })}>Pickup</button><button type="button" className={`${placeForm.type === 'dropoff' ? 'active' : ''} wj-place-type-btn`} onClick={() => setPlaceForm({ ...placeForm, type: 'dropoff' })}>Drop-off</button></div>
+        <button type="button" className="btn btn-outline wj-champagne-ghost wj-ghost-action" disabled={loading} onClick={addRegisterPlace} style={{ marginBottom: 12 }}>Add another place</button>
+        {error && <p className="error wj-alert-error">{error}</p>}{message && <p className="success wj-alert-success">{message}</p>}
+        <button className="btn btn-primary wj-gold-cta" disabled={loading}>{loading ? 'Please wait…' : 'Finish & create account'}</button>
+        <p className="wj-skip-row" style={{ textAlign: 'center', marginTop: 8 }}><button type="button" className="wj-text-button wj-gold-link" onClick={finishRegistration} disabled={loading}>Skip this step</button></p>
       </form>}
 
-      {authStep === 'forgot' && <form onSubmit={requestForgotPin}>
-        <div className="form-group"><label>Mobile number</label><input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="07700 123456" autoFocus required /></div>
-        {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
-        <button className="btn btn-primary" disabled={loading}>{loading ? 'Please wait…' : 'Send verification code'}</button>
-        <div className="wj-customer-links" style={{ marginTop: 12 }}>
-          <button type="button" className="wj-text-button" onClick={() => switchMode('login')} disabled={loading}>Back to log in</button>
-          <Link to="/" className="wj-portal-back">← Back to booking</Link>
+      {authStep === 'forgot' && <form className="wj-auth-form wj-forgot-form" onSubmit={requestForgotPin}>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Mobile number</label><input className="wj-obsidian-input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="07700 123456" autoFocus required /></div>
+        {error && <p className="error wj-alert-error">{error}</p>}{message && <p className="success wj-alert-success">{message}</p>}
+        <button className="btn btn-primary wj-gold-cta" disabled={loading}>{loading ? 'Please wait…' : 'Send verification code'}</button>
+        <div className="wj-customer-links wj-auth-footer" style={{ marginTop: 12 }}>
+          <button type="button" className="wj-text-button wj-gold-link" onClick={() => switchMode('login')} disabled={loading}>Back to log in</button>
+          <Link to="/" className="wj-portal-back wj-portal-return">← Back to booking</Link>
         </div>
       </form>}
 
-      {authStep === 'forgot-otp' && <form onSubmit={resetForgotPin}>
-        <div className="form-group"><label>Verification code</label><input inputMode="numeric" pattern="[0-9]{6}" value={forgotOtp} onChange={e => setForgotOtp(e.target.value)} placeholder="6-digit code" autoFocus required /></div>
-        <div className="form-group"><label>New 6-digit PIN</label><input inputMode="numeric" pattern="[0-9]{6}" type="password" value={forgotPin} onChange={e => setForgotPin(e.target.value)} placeholder="6-digit PIN" required /></div>
-        <div className="form-group"><label>Confirm new PIN</label><input inputMode="numeric" pattern="[0-9]{6}" type="password" value={forgotConfirmPin} onChange={e => setForgotConfirmPin(e.target.value)} placeholder="Re-enter PIN" required /></div>
-        {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
-        <button className="btn btn-primary" disabled={loading}>{loading ? 'Please wait…' : 'Save PIN'}</button>
-        <div className="wj-customer-links" style={{ marginTop: 12 }}>
-          <button type="button" className="wj-text-button" onClick={() => switchMode('forgot')} disabled={loading}>Resend code</button>
-          <Link to="/" className="wj-portal-back">← Back to booking</Link>
+      {authStep === 'forgot-otp' && <form className="wj-auth-form wj-reset-pin-form" onSubmit={resetForgotPin}>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Verification code</label><input className="wj-obsidian-input" inputMode="numeric" pattern="[0-9]{6}" value={forgotOtp} onChange={e => setForgotOtp(e.target.value)} placeholder="6-digit code" autoFocus required /></div>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">New 6-digit PIN</label><input className="wj-obsidian-input" inputMode="numeric" pattern="[0-9]{6}" type="password" value={forgotPin} onChange={e => setForgotPin(e.target.value)} placeholder="6-digit PIN" required /></div>
+        <div className="form-group wj-gilt-field"><label className="wj-gold-label">Confirm new PIN</label><input className="wj-obsidian-input" inputMode="numeric" pattern="[0-9]{6}" type="password" value={forgotConfirmPin} onChange={e => setForgotConfirmPin(e.target.value)} placeholder="Re-enter PIN" required /></div>
+        {error && <p className="error wj-alert-error">{error}</p>}{message && <p className="success wj-alert-success">{message}</p>}
+        <button className="btn btn-primary wj-gold-cta" disabled={loading}>{loading ? 'Please wait…' : 'Save PIN'}</button>
+        <div className="wj-customer-links wj-auth-footer" style={{ marginTop: 12 }}>
+          <button type="button" className="wj-text-button wj-gold-link" onClick={() => switchMode('forgot')} disabled={loading}>Resend code</button>
+          <Link to="/" className="wj-portal-back wj-portal-return">← Back to booking</Link>
         </div>
       </form>}
     </div></div>;
@@ -353,39 +349,40 @@ export default function CustomerPage() {
       ? 'Your recent booking history shows missed or late cancellations. Continued issues may restrict future bookings.'
       : null;
 
-  return <div className="wj-shell"><div className="wj-frame wj-customer-dashboard">
-    <header className="wj-customer-header"><img src={logo} alt="The Wirral Jobe" /><div><span>Customer portal</span><strong>{customer.name}</strong></div><button className="wj-header-logout" onClick={logout}>Log out</button></header>
-    <Link to="/" className="wj-customer-book">Book a ride <b>›</b></Link>
-    {trustMessage && <p className="error" style={{ margin: '0.5rem 0', fontSize: '0.85rem' }}>{trustMessage}</p>}
-    {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
-    <section className="wj-customer-section"><h2>Your bookings</h2><div className="wj-customer-tabs"><button className={tab === 'future' ? 'active' : ''} onClick={() => setTab('future')}>Future ({futureJobs.length})</button><button className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>Past ({pastJobs.length})</button></div>
-      {shownJobs.length === 0 ? <p className="wj-customer-empty">No {tab} bookings yet.</p> : shownJobs.map(job => {
+  return <div className="wj-shell wj-obsidian-shell"><div className="wj-frame wj-gilt-frame wj-customer-dashboard wj-dashboard-chamber">
+    <nav className="wj-customer-topnav"><Link className="active" to="/">Book</Link><Link to="/driver">Driver</Link></nav>
+    <header className="wj-customer-header wj-dashboard-header wj-obsidian-header"><img src={logo} alt="The Wirral Jobe" className="wj-header-logo" /><div className="wj-greeting"><span className="wj-eyebrow">Customer portal</span><strong className="wj-customer-name">{customer.name}</strong></div><button className="wj-header-logout wj-gold-logout" onClick={logout}>Log out</button></header>
+    <Link to="/" className="wj-customer-book wj-gold-book-button">Book a ride <b className="wj-book-chevron">›</b></Link>
+    {trustMessage && <p className="error wj-alert-error" style={{ margin: '0.5rem 0', fontSize: '0.85rem' }}>{trustMessage}</p>}
+    {error && <p className="error wj-alert-error">{error}</p>}{message && <p className="success wj-alert-success">{message}</p>}
+    <section className="wj-customer-section wj-dashboard-section wj-bookings-panel"><h2 className="wj-section-title">Your bookings</h2><div className="wj-customer-tabs wj-gold-tabs"><button className={`wj-gold-tab ${tab === 'future' ? 'active' : ''}`} onClick={() => setTab('future')}>Future ({futureJobs.length})</button><button className={`wj-gold-tab ${tab === 'past' ? 'active' : ''}`} onClick={() => setTab('past')}>Past ({pastJobs.length})</button></div>
+      {shownJobs.length === 0 ? <p className="wj-customer-empty wj-empty-state">No {tab} bookings yet.</p> : shownJobs.map(job => {
         const canCancel = !['COMPLETE', 'CANCELLED', 'NO_SHOW', 'CUSTOMER_CANCELLED'].includes(job.status);
-        return (<article className="wj-customer-job" key={job.jobId}><div><span className={`badge status-${job.status || 'NEW'}`}>{(job.status || 'NEW').replace('_', ' ')}</span><time>{dateLabel(job.pickupTime)}</time></div><strong>{job.pickupAddress}</strong><i>↓</i><strong>{job.dropoffAddress}</strong><footer><span>{job.vehicleType === 'mpv' ? 'MPV' : 'Saloon / estate'}</span><b>Maximum £{Number(job.fare || 0).toFixed(2)}</b>{canCancel && <button className="wj-text-button" style={{ marginLeft: 'auto', color: 'var(--danger)' }} onClick={() => setCancellingJob(job)}>Cancel</button>}</footer></article>);
+        return (<article className="wj-customer-job wj-job-card wj-obsidian-card" key={job.jobId}><div><span className={`badge status-${job.status || 'NEW'} wj-status-badge`}>{(job.status || 'NEW').replace('_', ' ')}</span><time className="wj-job-time">{dateLabel(job.pickupTime)}</time></div><strong className="wj-job-address">{job.pickupAddress}</strong><i className="wj-route-arrow">↓</i><strong className="wj-job-address">{job.dropoffAddress}</strong><footer className="wj-job-meta"><span className="wj-vehicle-type">{job.vehicleType === 'mpv' ? 'MPV' : 'Saloon / estate'}</span><b className="wj-gold-fare">Maximum £{Number(job.fare || 0).toFixed(2)}</b>{canCancel && <button className="wj-text-button wj-gold-link wj-cancel-trigger" style={{ marginLeft: 'auto', color: 'var(--danger)' }} onClick={() => setCancellingJob(job)}>Cancel</button>}</footer></article>);
       })}
     </section>
     {cancellingJob && (
-      <div className="wj-modal" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-        <div style={{ background: 'var(--surface)', padding: '1.5rem', borderRadius: 12, maxWidth: 360, width: '90%' }}>
-          <h3 style={{ marginBottom: '0.75rem' }}>Cancel booking</h3>
-          <p style={{ marginBottom: '0.75rem', color: 'var(--muted)' }}>Please let us know why.</p>
+      <div className="wj-modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <div className="wj-modal-panel wj-cancel-modal" style={{ background: 'var(--surface)', padding: '1.5rem', borderRadius: 12, maxWidth: 360, width: '90%' }}>
+          <h3 className="wj-modal-title" style={{ marginBottom: '0.75rem' }}>Cancel booking</h3>
+          <p className="wj-modal-copy" style={{ marginBottom: '0.75rem', color: 'var(--muted)' }}>Please let us know why.</p>
           {CANCEL_REASONS.map(r => (
-            <label key={r} style={{ display: 'block', margin: '0.4rem 0', cursor: 'pointer' }}>
+            <label className="wj-cancel-reason" key={r} style={{ display: 'block', margin: '0.4rem 0', cursor: 'pointer' }}>
               <input type="radio" name="cancelReason" value={r} checked={cancelReason === r} onChange={e => setCancelReason(e.target.value)} /> {r}
             </label>
           ))}
-          {error && <p className="error">{error}</p>}
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-            <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setCancellingJob(null)}>Close</button>
-            <button className="btn btn-primary" style={{ flex: 1 }} disabled={loading} onClick={() => cancelJob(cancellingJob.jobId)}>{loading ? 'Cancelling…' : 'Confirm cancel'}</button>
+          {error && <p className="error wj-alert-error">{error}</p>}
+          <div className="wj-modal-actions" style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+            <button className="btn btn-outline wj-champagne-ghost wj-close-btn" style={{ flex: 1 }} onClick={() => setCancellingJob(null)}>Close</button>
+            <button className="btn btn-primary wj-gold-cta wj-confirm-btn" style={{ flex: 1 }} disabled={loading} onClick={() => cancelJob(cancellingJob.jobId)}>{loading ? 'Cancelling…' : 'Confirm cancel'}</button>
           </div>
         </div>
       </div>
     )}
-    <section className="wj-customer-section"><h2>Saved places</h2><p className="wj-customer-copy">Save your regular pickup and drop-off locations for future bookings.</p>
-      <div className="wj-saved-places">{places.length === 0 && <p className="wj-customer-empty">No saved places yet.</p>}{places.map(place => <article key={place.id}><span>{place.type === 'pickup' ? '↑' : '↓'}</span><div><strong>{place.label}</strong><small>{place.address}</small></div><button onClick={() => removePlace(place.id)} disabled={loading} aria-label={`Remove ${place.label}`}>×</button></article>)}</div>
-      <form className="wj-place-form" onSubmit={savePlace}><div className="form-group"><label>Place name</label><input value={placeForm.label} onChange={e => setPlaceForm({ ...placeForm, label: e.target.value })} placeholder="e.g. Home" /></div><div className="form-group"><label>Address</label><input value={placeForm.address} onChange={e => setPlaceForm({ ...placeForm, address: e.target.value })} placeholder="Full address" /></div><div className="wj-place-coordinates"><div className="form-group"><label>Latitude</label><input type="number" step="any" value={placeForm.lat} onChange={e => setPlaceForm({ ...placeForm, lat: e.target.value })} placeholder="53.39" /></div><div className="form-group"><label>Longitude</label><input type="number" step="any" value={placeForm.lng} onChange={e => setPlaceForm({ ...placeForm, lng: e.target.value })} placeholder="-3.02" /></div></div><div className="wj-place-type"><button type="button" className={placeForm.type === 'pickup' ? 'active' : ''} onClick={() => setPlaceForm({ ...placeForm, type: 'pickup' })}>Pickup</button><button type="button" className={placeForm.type === 'dropoff' ? 'active' : ''} onClick={() => setPlaceForm({ ...placeForm, type: 'dropoff' })}>Drop-off</button></div><button className="btn btn-outline" disabled={loading}>Save place</button></form>
+    <section className="wj-customer-section wj-dashboard-section wj-saved-places-panel"><h2 className="wj-section-title">Saved places</h2><p className="wj-customer-copy wj-section-copy">Save your regular pickup and drop-off locations for future bookings.</p>
+      <div className="wj-saved-places wj-place-list">{places.length === 0 && <p className="wj-customer-empty wj-empty-state">No saved places yet.</p>}{places.map(place => <article className="wj-place-card wj-saved-place" key={place.id}><span className="wj-place-arrow">{place.type === 'pickup' ? '↑' : '↓'}</span><div className="wj-place-copy"><strong>{place.label}</strong><small>{place.address}</small></div><button className="wj-place-remove" onClick={() => removePlace(place.id)} disabled={loading} aria-label={`Remove ${place.label}`}>×</button></article>)}</div>
+      <form className="wj-place-form wj-place-form-panel" onSubmit={savePlace}><div className="form-group wj-gilt-field"><label className="wj-gold-label">Place name</label><input className="wj-obsidian-input" value={placeForm.label} onChange={e => setPlaceForm({ ...placeForm, label: e.target.value })} placeholder="e.g. Home" /></div><div className="form-group wj-gilt-field"><label className="wj-gold-label">Address</label><input className="wj-obsidian-input" value={placeForm.address} onChange={e => setPlaceForm({ ...placeForm, address: e.target.value })} placeholder="Full address" /></div><div className="wj-place-coordinates wj-coordinates-row"><div className="form-group wj-gilt-field"><label className="wj-gold-label">Latitude</label><input className="wj-obsidian-input" type="number" step="any" value={placeForm.lat} onChange={e => setPlaceForm({ ...placeForm, lat: e.target.value })} placeholder="53.39" /></div><div className="form-group wj-gilt-field"><label className="wj-gold-label">Longitude</label><input className="wj-obsidian-input" type="number" step="any" value={placeForm.lng} onChange={e => setPlaceForm({ ...placeForm, lng: e.target.value })} placeholder="-3.02" /></div></div><div className="wj-place-type wj-place-type-toggle"><button type="button" className={`${placeForm.type === 'pickup' ? 'active' : ''} wj-place-type-btn`} onClick={() => setPlaceForm({ ...placeForm, type: 'pickup' })}>Pickup</button><button type="button" className={`${placeForm.type === 'dropoff' ? 'active' : ''} wj-place-type-btn`} onClick={() => setPlaceForm({ ...placeForm, type: 'dropoff' })}>Drop-off</button></div><button className="btn btn-outline wj-champagne-ghost wj-save-place-btn" disabled={loading}>Save place</button></form>
     </section>
-    <section className="wj-customer-section"><h2>Account</h2><p className="wj-customer-copy">You can permanently delete your account and saved places. Journey records that must be retained will be anonymised.</p><button type="button" className="btn btn-danger" onClick={deleteAccount} disabled={loading}>{loading ? 'Please wait…' : 'Delete account'}</button></section>
+    <section className="wj-customer-section wj-dashboard-section wj-account-panel"><h2 className="wj-section-title">Account</h2><p className="wj-customer-copy wj-section-copy">You can permanently delete your account and saved places. Journey records that must be retained will be anonymised.</p><button type="button" className="btn btn-danger wj-danger-cta" onClick={deleteAccount} disabled={loading}>{loading ? 'Please wait…' : 'Delete account'}</button></section>
   </div></div>;
 }

@@ -107,8 +107,10 @@ function DriverPageContent() {
   const [profile, setProfile] = useState(null);
   const [myLocation, setMyLocation] = useState(null);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [locationError, setLocationError] = useState('');
   const [locationOk, setLocationOk] = useState(false);
+  const [gpsAccuracy, setGpsAccuracy] = useState(null);
   const [lastLocationSentAt, setLastLocationSentAt] = useState(null);
   const [mapReady, setMapReady] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -126,12 +128,14 @@ function DriverPageContent() {
   const [myBids, setMyBids] = useState([]);
   const [futureBookings, setFutureBookings] = useState([]);
   const [futureOffers, setFutureOffers] = useState([]);
-  const [futureTab, setFutureTab] = useState('upcoming');
+  const [futureTab, setFutureTab] = useState('available');
   const [followMe, setFollowMe] = useState(true);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
   const [appError, setAppError] = useState('');
-  const [mapMode, setMapMode] = useState('zone');
+  const [mapMode, setMapMode] = useState('route');
   const [routeInfo, setRouteInfo] = useState(null);
+  const [navigationProblem, setNavigationProblem] = useState(null);
+  const [navigationRetryKey, setNavigationRetryKey] = useState(0);
   const [bgLocationStatus, setBgLocationStatus] = useState('unknown');
   const [locationNoticeDismissed, setLocationNoticeDismissed] = useState(false);
   const [headerExpanded, setHeaderExpanded] = useState(false);
@@ -153,7 +157,26 @@ function DriverPageContent() {
   const lastLocationUpdateRef = useRef(0);
   const lastGpsReadingRef = useRef(0);
   const refreshLocationRef = useRef(null);
+  const locationOffTimerRef = useRef(null);
   const currentZoneIdRef = useRef(currentZoneId);
+
+  function markLocationOn() {
+    if (locationOffTimerRef.current) window.clearTimeout(locationOffTimerRef.current);
+    locationOffTimerRef.current = null;
+    setLocationOk(true);
+  }
+
+  function scheduleLocationOff() {
+    if (locationOffTimerRef.current) return;
+    locationOffTimerRef.current = window.setTimeout(() => {
+      setLocationOk(false);
+      locationOffTimerRef.current = null;
+    }, 5000);
+  }
+
+  useEffect(() => () => {
+    if (locationOffTimerRef.current) window.clearTimeout(locationOffTimerRef.current);
+  }, []);
 
   useEffect(() => { currentZoneIdRef.current = currentZoneId; }, [currentZoneId]);
 
@@ -252,7 +275,7 @@ function DriverPageContent() {
     if (activeJob) {
       setMapMode('route');
     } else {
-      setMapMode('zone');
+      setMapMode('route');
       setRouteInfo(null);
     }
   }, [activeJob]);
@@ -372,7 +395,7 @@ function DriverPageContent() {
       setProfile(data);
       if (data.lastLocationAt) {
         const ageMs = Date.now() - new Date(data.lastLocationAt).getTime();
-        if (ageMs >= 0 && ageMs < 120000) setLocationOk(true);
+        if (ageMs >= 0 && ageMs < 120000) markLocationOn();
       }
     }
     catch (err) { console.error(err); }
@@ -384,7 +407,7 @@ function DriverPageContent() {
       setProfile(data.profile);
       if (data.profile?.lastLocationAt) {
         const ageMs = Date.now() - new Date(data.profile.lastLocationAt).getTime();
-        if (ageMs >= 0 && ageMs < 120000) setLocationOk(true);
+        if (ageMs >= 0 && ageMs < 120000) markLocationOn();
       }
       setJobs(data.jobs || []);
       setOffers(data.offers || []);
@@ -443,6 +466,15 @@ function DriverPageContent() {
     finally { setLoading(false); }
   }
 
+  async function requestFutureBooking(jobId) {
+    setLoading(true); setError('');
+    try {
+      await api(`driver/future-bookings/${jobId}/request`, {}, driverAuth());
+      await Promise.all([loadFutureBookings(), loadJobs()]);
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
   async function acceptFutureBooking(jobId) {
     setLoading(true); setError('');
     try {
@@ -496,10 +528,11 @@ function DriverPageContent() {
       const perm = await Geolocation.requestPermissions();
       if (perm && perm.location === 'denied') throw { code: 1, message: 'Location access denied' };
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
-      const { latitude, longitude, heading: h } = pos.coords;
+      const { latitude, longitude, accuracy, heading: h } = pos.coords;
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-      setMyLocation({ lat: latitude, lng: longitude });
-      setLocationOk(true);
+      setGpsAccuracy(Number.isFinite(accuracy) ? accuracy : null);
+      setMyLocation({ lat: latitude, lng: longitude, accuracy: Number.isFinite(accuracy) ? accuracy : null });
+      markLocationOn();
       setLocationError('');
       lastGpsReadingRef.current = Date.now();
       if (h != null && !Number.isNaN(h)) setHeading(h);
@@ -510,16 +543,17 @@ function DriverPageContent() {
       }
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const { latitude, longitude, heading: h } = position.coords;
+          const { latitude, longitude, accuracy, heading: h } = position.coords;
           if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-          setMyLocation({ lat: latitude, lng: longitude });
-          setLocationOk(true);
+          setGpsAccuracy(Number.isFinite(accuracy) ? accuracy : null);
+          setMyLocation({ lat: latitude, lng: longitude, accuracy: Number.isFinite(accuracy) ? accuracy : null });
+          markLocationOn();
           setLocationError('');
           lastGpsReadingRef.current = Date.now();
           if (h != null && !Number.isNaN(h)) setHeading(h);
         },
         (err) => {
-          setLocationOk(false);
+          scheduleLocationOff();
           if (err.code === 1) setLocationError('Location access denied. Enable location services in your device settings and tap Loc off.');
           else if (err.code === 2) setLocationError('Location unavailable. Check that GPS/location services are turned on.');
           else if (err.code === 3) setLocationError('Location request timed out. Signal may be weak.');
@@ -574,7 +608,7 @@ function DriverPageContent() {
       setPinInput('');
       await loadJobs(); await loadProfile();
       updateDriverService({ status: 'POB', jobId, fare: activeJob?.fare || 0 });
-    } catch (err) { setError(err.message); }
+    } catch (err) { setError(`Journey PIN not accepted. ${err.message || 'Check the four digits with the passenger and try again.'}`); }
     finally { setLoading(false); }
   }
 
@@ -793,7 +827,7 @@ function DriverPageContent() {
     bidBoard.forEach(job => {
       if (job.myBid) return;
       const marker = L.marker([job.pickupLat, job.pickupLng], { icon: coinIcon(L) }).addTo(map)
-        .bindPopup(`Bid: ${job.pickupAddress}<br/>${formatCurrency(job.fare)}`);
+        .bindPopup(`Live job: ${job.pickupAddress}<br/>${formatCurrency(job.fare)}`);
       marker.on('click', () => { setSelectedBid(job); });
       bidMarkersRef.current.push(marker);
     });
@@ -855,7 +889,8 @@ function DriverPageContent() {
     if (!loggedIn) return;
     const age = lastLocationSentAt ? now - lastLocationSentAt : Infinity;
     const shouldBeOk = age >= 0 && age < 120000;
-    if (locationOk !== shouldBeOk) setLocationOk(shouldBeOk);
+    if (shouldBeOk) markLocationOn();
+    else if (locationOk) scheduleLocationOff();
   }, [loggedIn, now, lastLocationSentAt, locationOk]);
 
   useEffect(() => {
@@ -914,9 +949,10 @@ function DriverPageContent() {
       const { latitude, longitude, accuracy, heading: h } = position.coords;
       if (!mounted) return;
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-      const location = { lat: latitude, lng: longitude };
-      setMyLocation(location);
-      setLocationOk(true);
+      const location = { lat: latitude, lng: longitude, accuracy: Number.isFinite(accuracy) ? accuracy : null };
+      setGpsAccuracy(Number.isFinite(accuracy) ? accuracy : null);
+      if (!Number.isFinite(accuracy) || accuracy <= 100 || !lastGpsReadingRef.current) setMyLocation(location);
+      markLocationOn();
       setLocationError('');
       lastGpsReadingRef.current = Date.now();
       if (nativeLocationActive) {
@@ -966,7 +1002,7 @@ function DriverPageContent() {
     }
 
     function onGeoError(err) {
-      setLocationOk(false);
+      scheduleLocationOff();
       if (!err) return;
       if (err.code === 1) {
         setLocationError('Location access denied. Enable location services and refresh the page.');
@@ -1062,7 +1098,7 @@ function DriverPageContent() {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+    <div className={activeJob?.status === 'POB' ? 'wj-driver-app pob-mode' : 'wj-driver-app'} style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       <div style={{ position: 'absolute', top: 12, left: 12, right: headerExpanded ? 12 : 'auto', zIndex: 1000, maxWidth: headerExpanded ? 'none' : 'calc(100% - 150px)' }} className="wj-driver-header">
         <button type="button" onClick={() => setHeaderExpanded(value => !value)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 0, border: 0, background: 'transparent', color: 'inherit', textAlign: 'left', minWidth: 0 }} aria-expanded={headerExpanded} aria-label={headerExpanded ? 'Collapse driver details' : 'Expand driver details'}>
           <img src={logo} alt="The Wirral Jobe" className="logo-badge" style={!headerExpanded ? { width: 34, height: 34 } : undefined} />
@@ -1100,17 +1136,15 @@ function DriverPageContent() {
         </div>
       )}
 
-      {locationError && (
-        <div style={{ position: 'absolute', top: Capacitor.isNativePlatform() && bgLocationStatus === 'denied' && !locationNoticeDismissed ? (headerExpanded ? 270 : 200) : (headerExpanded ? 132 : 64), left: 12, right: 12, zIndex: 1100 }}>
-          <p className="error" style={{ margin: 0, padding: '0.6rem 0.9rem', borderRadius: 10, background: 'var(--surface)', border: '1.5px solid rgba(239,68,68,0.4)' }}>{locationError}</p>
-        </div>
-      )}
+      {locationError && <div className="wj-driver-problem wj-location-problem"><div><strong>{gpsAccuracy > 100 ? 'Location accuracy is poor' : 'Driver location unavailable'}</strong><span>{locationError}</span></div><button type="button" onClick={requestLocation}>Refresh location</button></div>}
 
       {appError && (
         <div style={{ position: 'absolute', top: ((Capacitor.isNativePlatform() && bgLocationStatus === 'denied' ? 64 : 0) + (locationError ? 64 : 0) + 76), left: 12, right: 12, zIndex: 1000 }}>
           <pre style={{ margin: 0, padding: '0.6rem 0.9rem', borderRadius: 10, background: 'var(--surface)', border: '1.5px solid rgba(239,68,68,0.4)', color: '#ff9d9d', fontSize: '0.75rem', whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto' }}>{appError}</pre>
         </div>
       )}
+
+      {mapMode === 'route' && navigationProblem && <div className="wj-driver-problem wj-navigation-problem"><div><strong>{navigationProblem.title}</strong><span>{navigationProblem.message}</span></div><div>{navigationProblem.action === 'location' && <button type="button" onClick={requestLocation}>Refresh location</button>}{navigationProblem.action === 'retry' && <button type="button" onClick={() => setNavigationRetryKey(value => value + 1)}>Retry route</button>}{activeJob && <button type="button" onClick={() => setNavigationTarget({ label: ['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? 'pickup' : 'drop off', address: ['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? activeJob.pickupAddress : activeJob.dropoffAddress, lat: ['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? activeJob.pickupLat : activeJob.dropoffLat, lng: ['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? activeJob.pickupLng : activeJob.dropoffLng })}>Open maps</button>}</div></div>}
 
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <div ref={mapRef} style={{ position: 'absolute', inset: 0, opacity: mapMode === 'zone' ? 1 : 0, pointerEvents: mapMode === 'zone' ? 'auto' : 'none' }} />
@@ -1124,85 +1158,27 @@ function DriverPageContent() {
               follow={followMe}
               onFollowChange={setFollowMe}
               onRouteInfo={setRouteInfo}
+              onNavigationProblem={setNavigationProblem}
+              retryKey={navigationRetryKey}
             />
           </React.Suspense>
         )}
       </div>
 
-      {loggedIn && (
-        <div style={{ position: 'absolute', top: headerExpanded ? 132 : 12, right: 12, zIndex: 1100, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-          <div role="group" aria-label="Map view" style={{ display: 'flex', padding: 3, borderRadius: 999, border: '1.5px solid var(--border-strong)', background: mapTheme === 'dark' ? 'rgba(10,10,10,0.9)' : 'rgba(255,255,255,0.95)', boxShadow: '0 4px 14px rgba(0,0,0,0.3)' }}>
-            <button type="button" aria-pressed={mapMode === 'zone'} onClick={() => setMapMode('zone')} style={{ border: 0, borderRadius: 999, padding: '0.42rem 0.75rem', background: mapMode === 'zone' ? 'var(--gold)' : 'transparent', color: mapMode === 'zone' ? '#050505' : (mapTheme === 'dark' ? 'var(--cream)' : '#172033'), fontWeight: 800, fontSize: '0.75rem' }}>Zones</button>
-            <button type="button" aria-pressed={mapMode === 'route'} onClick={() => { setFollowMe(true); setMapMode('route'); }} style={{ border: 0, borderRadius: 999, padding: '0.42rem 0.75rem', background: mapMode === 'route' ? 'var(--gold)' : 'transparent', color: mapMode === 'route' ? '#050505' : (mapTheme === 'dark' ? 'var(--cream)' : '#172033'), fontWeight: 800, fontSize: '0.75rem' }}>Route</button>
-          </div>
-          <button
-            type="button"
-            className="btn btn-outline btn-sm"
-            onClick={() => setMapTheme(theme => {
-              const next = theme === 'dark' ? 'light' : 'dark';
-              localStorage.setItem('mapTheme', next);
-              return next;
-            })}
-            style={{ background: mapTheme === 'dark' ? 'rgba(10,10,10,0.88)' : 'rgba(255,255,255,0.94)', color: mapTheme === 'dark' ? 'var(--cream)' : '#172033' }}
-          >
-            {mapTheme === 'dark' ? 'Light map' : 'Dark map'}
-          </button>
-        </div>
-      )}
+      {loggedIn && mapMode === 'route' && <div className="wj-map-controls route-mode">
+        <div className="wj-satnav-side-controls"><button type="button" onClick={() => setMapTheme(theme => { const next = theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('mapTheme', next); return next; })} aria-label="Change map theme">☼<small>{mapTheme === 'dark' ? 'Light' : 'Dark'}</small></button><button type="button" onClick={() => setFollowMe(true)} aria-label="Orient map north">▲<small>N</small></button><button type="button" className={followMe ? 'active' : ''} onClick={() => setFollowMe(true)} aria-label="Recenter and follow">◎</button></div>
+      </div>}
 
-      {mapMode === 'route' && routeInfo && (
-        <>
-          <div style={{ position: 'absolute', top: 72, left: 12, right: 90, zIndex: 1000 }}>
-            <div className="card" style={{ padding: '1rem 1.1rem', borderRadius: 18, border: '1.5px solid var(--gold)', background: 'rgba(10,10,10,0.95)', display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--gold)', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} dangerouslySetInnerHTML={{ __html: maneuverIconSvg(routeInfo.steps?.[0]?.maneuver, 38) }} />
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: '0.95rem', color: 'var(--cream)', fontWeight: 800, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{routeInfo.steps?.[0]?.instruction || 'Head to ' + routeInfo.targetLabel}</div>
-                {routeInfo.steps?.[0]?.road && <div style={{ fontSize: '0.75rem', color: 'var(--gold)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{routeInfo.steps[0].road}</div>}
-                <div style={{ fontSize: '1.35rem', color: 'var(--cream)', fontWeight: 900, marginTop: 2, fontFamily: 'var(--font-display)' }}>{routeInfo.steps?.[0]?.distance || routeInfo.distanceText}</div>
-              </div>
-            </div>
-          </div>
+      {mapMode === 'route' && routeInfo && <div className="wj-satnav-banner">
+        <div className="wj-satnav-maneuver" dangerouslySetInnerHTML={{ __html: maneuverIconSvg(routeInfo.steps?.[0]?.maneuver, 54) }} />
+        <div className="wj-satnav-copy"><strong>{routeInfo.steps?.[0]?.instruction || 'Head to ' + routeInfo.targetLabel}</strong>{routeInfo.steps?.[0]?.road && <small>towards {routeInfo.steps[0].road}</small>}<b>{routeInfo.steps?.[0]?.distance || routeInfo.distanceText}</b></div>
+        {routeInfo.steps?.[1] && <div className="wj-satnav-next"><small>Then</small><span dangerouslySetInnerHTML={{ __html: maneuverIconSvg(routeInfo.steps[1].maneuver, 22) }} /></div>}
+      </div>}
 
-          <div style={{ position: 'absolute', bottom: 84, left: 12, right: 12, zIndex: 1000, display: activeJob ? 'none' : 'block' }}>
-            <div className="card" style={{ padding: '0.75rem 1rem', borderRadius: 16, border: '1.5px solid var(--border-strong)', background: 'rgba(10,10,10,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ textAlign: 'center', flex: 1 }}>
-                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 700, textTransform: 'uppercase' }}>Arrival</div>
-                <div style={{ fontSize: '1.1rem', color: 'var(--cream)', fontWeight: 800 }}>{routeInfo.durationText}</div>
-              </div>
-              <div style={{ width: 1, height: 32, background: 'var(--border)' }} />
-              <div style={{ textAlign: 'center', flex: 1 }}>
-                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 700, textTransform: 'uppercase' }}>Distance</div>
-                <div style={{ fontSize: '1.1rem', color: 'var(--cream)', fontWeight: 800 }}>{routeInfo.distanceText}</div>
-              </div>
-              <div style={{ width: 1, height: 32, background: 'var(--border)' }} />
-              <div style={{ textAlign: 'center', flex: 1 }}>
-                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 700, textTransform: 'uppercase' }}>Target</div>
-                <div style={{ fontSize: '1.1rem', color: 'var(--gold)', fontWeight: 800 }}>{routeInfo.targetLabel}</div>
-              </div>
-            </div>
-          </div>
-
-          {routeInfo.steps && routeInfo.steps.length > 1 && (
-            <div style={{ position: 'absolute', bottom: 160, left: 12, right: 12, zIndex: 1000, maxHeight: '28vh' }}>
-              <div className="card" style={{ padding: '0.55rem 0.7rem', borderRadius: 16, border: '1.5px solid var(--border-strong)', background: 'rgba(10,10,10,0.96)', overflowY: 'auto' }}>
-                {routeInfo.steps.slice(1).map((step, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0.45rem 0', borderBottom: i === routeInfo.steps.length - 2 ? 'none' : '1px solid rgba(255,255,255,0.08)' }}>
-                    <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--surface)', color: 'var(--cream)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} dangerouslySetInnerHTML={{ __html: maneuverIconSvg(step.maneuver, 22) }} />
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--cream)', fontWeight: 600, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{step.instruction}</div>
-                      {step.road && <div style={{ fontSize: '0.65rem', color: 'var(--gold-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{step.road}</div>}
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--cream-dim)', fontWeight: 700, flexShrink: 0 }}>{step.distance}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
+      {mapMode === 'route' && routeInfo && !activeJob && <div className="wj-route-metrics"><span><small>Arrival</small><strong>{routeInfo.durationText}</strong></span><span><small>Distance</small><strong>{routeInfo.distanceText}</strong></span><span><small>Target</small><strong>{routeInfo.targetLabel}</strong></span></div>}
 
       <div style={{
-        position: 'absolute', bottom: 74, left: 12, zIndex: 1000,
+        position: 'absolute', bottom: 74, left: 12, zIndex: 1000, display: mapMode === 'route' ? 'none' : 'block',
         background: 'var(--surface)', border: '1.5px solid var(--border-strong)', borderRadius: 14, padding: '0.7rem 0.9rem',
         maxWidth: 280, fontSize: '0.85rem'
       }}>
@@ -1239,7 +1215,7 @@ function DriverPageContent() {
             const runningRoute = offerRoutes[offer.jobId];
             const fareMiles = Number(offer.miles);
             return (
-              <div key={offer.jobId} className="card" style={{ pointerEvents: 'auto', border: '2px solid var(--gold)', borderRadius: 18, padding: 0, overflow: 'hidden', background: 'linear-gradient(135deg, #15130b, #090909)', boxShadow: '0 10px 30px rgba(0,0,0,0.45)' }}>
+              <div key={offer.jobId} className="card wj-offer-card" style={{ pointerEvents: 'auto', border: '2px solid var(--gold)', borderRadius: 18, padding: 0, background: 'linear-gradient(135deg, #15130b, #090909)', boxShadow: '0 10px 30px rgba(0,0,0,0.45)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'rgba(244,191,27,0.12)', borderBottom: '1.5px solid var(--gold)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span className="wj-dot wj-dot-green" style={{ animation: 'pulse 1.2s infinite' }} />
@@ -1307,16 +1283,8 @@ function DriverPageContent() {
       {activeJob && (
         <div className="wj-active-job-panel">
           <div className="card wj-active-job-card">
-            <div className="wj-active-job-summary">
-              <div>
-                <span className={`badge status-${activeJob.status}`}>{STATUS_LABELS[activeJob.status] || activeJob.status}</span>
-                <div className="wj-active-job-target">{['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? activeJob.pickupAddress : activeJob.dropoffAddress}</div>
-              </div>
-              <div className="wj-active-job-metrics">
-                {routeInfo && <span>{routeInfo.distanceText} · {routeInfo.durationText}</span>}
-                <strong>{liveMeter ? formatCurrency(liveMeter.fare) : formatCurrency(activeJob.fare)}</strong>
-              </div>
-            </div>
+            <div className="wj-active-job-heading"><span className={`badge status-${activeJob.status}`}>{STATUS_LABELS[activeJob.status] || activeJob.status}</span>{routeInfo && <span>◷ &nbsp;{routeInfo.distanceText} · {routeInfo.durationText}</span>}</div>
+            <div className="wj-active-job-summary"><span className="wj-active-job-pin">●</span><div><strong>{['ASSIGNED', 'ON_WAY'].includes(activeJob.status) ? activeJob.pickupAddress : activeJob.dropoffAddress}</strong>{activeJob.notes && <small>{activeJob.notes}</small>}</div><b>{liveMeter ? formatCurrency(liveMeter.fare) : formatCurrency(activeJob.fare)}</b></div>
 
             {activeJob.status === 'ARRIVED' ? (
               <div className="wj-primary-pin-action">
@@ -1330,7 +1298,7 @@ function DriverPageContent() {
             )}
 
             <button type="button" onClick={() => setJobCardExpanded(value => !value)} className="wj-job-details-toggle" aria-expanded={jobCardExpanded}>
-              {jobCardExpanded ? 'Hide job details' : 'More · Job details'}
+              {jobCardExpanded ? 'Hide job details' : 'Job details ›'}
             </button>
 
             {jobCardExpanded && (
@@ -1385,7 +1353,7 @@ function DriverPageContent() {
         <div style={{ position: 'absolute', bottom: 72, left: 12, right: 12, zIndex: 1001, maxHeight: '45vh', overflowY: 'auto' }}>
           <div className="card" style={{ padding: '1rem', borderRadius: 18, border: '2px solid var(--gold)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <span style={{ color: 'var(--gold)', fontWeight: 800, fontSize: '0.9rem' }}>Open job bid</span>
+              <span style={{ color: 'var(--gold)', fontWeight: 800, fontSize: '0.9rem' }}>Open live job</span>
               <button onClick={() => setSelectedBid(null)} className="btn btn-outline btn-sm">Close</button>
             </div>
             <div style={{ marginBottom: '0.75rem' }}>
@@ -1404,7 +1372,7 @@ function DriverPageContent() {
               <span style={{ fontWeight: 800, fontSize: '1.2rem' }}>{formatCurrency(selectedBid.fare)}</span>
             </div>
             <button onClick={() => placeBid(selectedBid.jobId, selectedBid.fare)} disabled={loading} className="btn btn-primary">
-              {loading ? 'Asking…' : 'Ask for this job'}
+              {loading ? 'Putting you forward…' : "I'm interested"}
             </button>
           </div>
         </div>
@@ -1413,20 +1381,20 @@ function DriverPageContent() {
       <div style={{
         position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 1050
       }} className="wj-bottom-nav">
-        <button className="wj-nav-item active" onClick={recenterMap}>
+        <button className="wj-nav-item active" onClick={() => { setMapMode('route'); recenterMap(); }}>
           <NavIcon.map /> Map
         </button>
         <button className="wj-nav-item" onClick={() => setOpenPanel('bids')}>
           <span style={{ position: 'relative' }}>
             <NavIcon.bids />
             {bidBoard.length > 0 && <span style={{ position: 'absolute', top: -6, right: -8, minWidth: 18, height: 18, padding: '0 4px', borderRadius: 999, background: 'var(--gold)', color: '#000', fontSize: '0.65rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{bidBoard.length}</span>}
-          </span> Bids
+          </span> Live jobs
         </button>
         <button className="wj-nav-item" onClick={() => setOpenPanel('future')}>
           <span style={{ position: 'relative' }}>
             <NavIcon.future />
-            {futureOffers.length > 0 && <span style={{ position: 'absolute', top: -6, right: -8, minWidth: 18, height: 18, padding: '0 4px', borderRadius: 999, background: 'var(--gold)', color: '#000', fontSize: '0.65rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{futureOffers.length}</span>}
-          </span> Future
+            {futureBookings.length > 0 && <span style={{ position: 'absolute', top: -6, right: -8, minWidth: 18, height: 18, padding: '0 4px', borderRadius: 999, background: 'var(--gold)', color: '#000', fontSize: '0.65rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{futureBookings.length}</span>}
+          </span> Future work
         </button>
         <button className="wj-nav-item" onClick={() => setOpenPanel('menu')}>
           <NavIcon.menu /> Menu
@@ -1444,46 +1412,51 @@ function DriverPageContent() {
             maxHeight: '78%', display: 'flex', flexDirection: 'column'
           }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.1rem 1.1rem 0.75rem', borderBottom: '1.5px solid var(--border)' }}>
-              <h2 className="wj-panel-title" style={{ margin: 0 }}>{openPanel === 'bids' ? 'Bids' : 'Future bookings'}</h2>
+              <h2 className="wj-panel-title" style={{ margin: 0 }}>{openPanel === 'bids' ? 'Live jobs' : 'Future work'}</h2>
               <button className="btn btn-outline btn-sm" onClick={() => setOpenPanel(null)}>Close</button>
             </div>
             <div style={{ overflowY: 'auto', padding: '0.9rem 1.1rem 1.75rem' }}>
               {openPanel === 'bids' && (
                 <div className="wj-bids-screen">
+                  <div className="wj-live-jobs-header">
+                    <div>
+                      <h3>Live jobs</h3>
+                      <p>Open jobs currently looking for a driver</p>
+                    </div>
+                    <span className="wj-live-jobs-count">{bidBoard.length}</span>
+                  </div>
                   <div className="wj-future-tabs" style={{ marginBottom: '0.9rem' }}>
                     <button className={bidTab === 'open' ? 'active' : ''} onClick={() => setBidTab('open')}>Open jobs</button>
-                    <button className={bidTab === 'mine' ? 'active' : ''} onClick={() => setBidTab('mine')}>My bids</button>
+                    <button className={bidTab === 'mine' ? 'active' : ''} onClick={() => setBidTab('mine')}>My jobs</button>
                   </div>
                   {bidTab === 'open' && (
                     <>
-                      {bidBoard.length === 0 && <p className="wj-bids-empty">No open jobs to bid on right now.</p>}
+                      {bidBoard.length === 0 && <p className="wj-bids-empty">No open jobs right now.</p>}
                       {bidBoard.map(job => {
-                        const pickupZone = findZone(job.pickupLat, job.pickupLng);
-                        const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
                         const runningRoute = offerRoutes[job.jobId];
-                        const fareMiles = Number(job.miles);
                         const bidSecondsLeft = job.bidClosesAt ? Math.max(0, Math.ceil((job.bidClosesAt - now) / 1000)) : null;
-                        const bidTimerText = bidSecondsLeft != null ? `${bidSecondsLeft}s left` : 'Bid to start 60s window';
+                        const bidTimerText = bidSecondsLeft != null ? `${bidSecondsLeft}s left` : 'Starting soon';
                         return (
                           <article key={job.jobId} className="wj-bid-job">
-                            <div className="wj-bid-heading"><div><h3>New bid <span className="wj-bid-timer">· {bidTimerText}</span></h3><p>Review the job details below and ask for it if you're available.</p></div><span className="wj-bid-availability"><i />Online<small>{queueInfo.zoneName}</small></span></div>
+                            <div className="wj-bid-heading">
+                              <div>
+                                <h3>Job open for bids <span className="wj-bid-timer">· {bidTimerText}</span></h3>
+                                <p>{job.pickupAddress} → {job.dropoffAddress}</p>
+                              </div>
+                            </div>
                             <div className="wj-bid-details">
-                              <div><span className="wj-bid-icon">●</span><p>Running distance<strong>{runningRoute ? `${runningRoute.miles.toFixed(1)} mi` : 'Calculating…'}</strong><small>{runningRoute?.durationText || 'Road route to pickup'}</small></p></div>
-                              <div><span className="wj-bid-icon">£</span><p>Maximum fare amount<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
-                              <div><span className="wj-bid-icon">╱</span><p>Fare distance<strong>{fareMiles.toFixed(1)} mi</strong><small>Estimated journey distance</small></p></div>
+                              <div><span className="wj-bid-icon">◷</span><p>Pickup<strong>ASAP</strong><small>{runningRoute ? `${runningRoute.miles.toFixed(1)} mi away · ${runningRoute.durationText}` : 'Calculating distance…'}</small></p></div>
                               <div><span className="wj-bid-icon">◷</span><p>Vehicle<strong>{job.vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</strong><small>Requested vehicle</small></p></div>
-                              <div><span className="wj-bid-icon">↑</span><p>Pickup zone<strong>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : job.pickupAddress}</strong><small>{job.pickupAddress}</small></p></div>
-                              <div><span className="wj-bid-icon">↓</span><p>Destination zone<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : job.dropoffAddress}</strong><small>{job.dropoffAddress}</small></p></div>
+                              <div><span className="wj-bid-icon">£</span><p>Max fare<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
                             </div>
                             {job.myBid ? (
-                              <div className="wj-bid-status">You asked for this job at {formatCurrency(job.myBid.amount)}.</div>
+                              <div className="wj-bid-status"><span style={{ color: 'var(--green)' }}>✓</span> You're in for this job. Allocation in {bidTimerText}.</div>
                             ) : (
                               <div className="wj-bid-actions">
-                                <button onClick={() => placeBid(job.jobId, job.fare)} disabled={loading} className="wj-bid-ask">✋ <span><strong>Ask for this job</strong><small>Ask to be considered for this job</small></span></button>
-                                <button onClick={() => setBidBoard(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading} className="wj-bid-decline">× <span><strong>Not for me</strong><small>Skip this job</small></span></button>
+                                <button onClick={() => placeBid(job.jobId, job.fare)} disabled={loading} className="wj-bid-ask"><span><strong>I'm interested</strong><small>Put me forward for this job</small></span></button>
+                                <button onClick={() => setBidBoard(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading} className="wj-bid-decline"><span><strong>Not for me</strong><small>Skip this job</small></span></button>
                               </div>
                             )}
-                            <p className="wj-bid-disclaimer">ⓘ Asking for the job does not guarantee assignment. The system selects the most suitable driver based on location, ETA, queue position and availability.</p>
                           </article>
                         );
                       })}
@@ -1492,24 +1465,23 @@ function DriverPageContent() {
 
                   {bidTab === 'mine' && (
                     <>
-                      {myBids.length === 0 && <p className="wj-bids-empty">You haven't asked for any jobs yet.</p>}
+                      {myBids.length === 0 && <p className="wj-bids-empty">You haven't shown interest in any jobs yet.</p>}
                       {myBids.map(bid => {
                         const job = bid.job || {};
                         const pickupZone = findZone(job.pickupLat, job.pickupLng);
                         const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
-                        const accepted = job.status && job.status !== 'BIDDING';
-                        let statusText = accepted ? 'Assigned to you' : 'Waiting to be assigned';
-                        if (bid.status === 'won') statusText = 'You won — awaiting offer';
-                        if (bid.status === 'unsuccessful') statusText = 'Bid unsuccessful';
+                        const assignedToMe = job.driver_id === driverId || bid.status === 'won';
+                        let statusText = assignedToMe ? 'You got the job' : (bid.status === 'unsuccessful' ? 'Allocated to another driver' : "You're in — allocation soon");
+                        let statusClass = assignedToMe ? 'won' : (bid.status === 'unsuccessful' ? 'lost' : 'pending');
                         return (
-                          <article key={bid.job_id || bid.created_at} className="wj-bid-job">
-                            <div className="wj-bid-heading"><div><h3>Your bid</h3><p>{statusText}</p></div><span className="wj-bid-availability"><i />{formatCurrency(bid.amount)}</span></div>
+                          <article key={`${bid.job_id || 'bid'}-${bid.created_at || ''}`} className="wj-bid-job">
+                            <div className="wj-bid-heading"><div><h3>Your live job</h3><p className={`wj-bid-status-text ${statusClass}`}>{statusText}</p></div></div>
                             <div className="wj-bid-details">
                               <div><span className="wj-bid-icon">●</span><p>Pickup<strong>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : job.pickupAddress}</strong><small>{job.pickupAddress}</small></p></div>
                               <div><span className="wj-bid-icon">↓</span><p>Drop-off<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : job.dropoffAddress}</strong><small>{job.dropoffAddress}</small></p></div>
                               <div><span className="wj-bid-icon">£</span><p>Fare<strong>{formatCurrency(job.fare)}</strong><small>Maximum charge</small></p></div>
                             </div>
-                            {accepted && <div className="wj-bid-status">Job assigned — check your active jobs.</div>}
+                            {assignedToMe && <div className="wj-bid-status" style={{ color: 'var(--green)' }}>✓ Check your active jobs for pickup details.</div>}
                           </article>
                         );
                       })}
@@ -1520,95 +1492,44 @@ function DriverPageContent() {
 
               {openPanel === 'future' && (
                 <div className="wj-future-screen">
-                  <div className="wj-future-hero"><img src={logo} alt="The Wirral Jobe" /><div><h3>Future bookings</h3><p>Jobs booked in advance. Allocation will start closer to the pickup time.</p></div></div>
-
-                  {futureOffers.length > 0 && (
-                    <div style={{ marginBottom: '0.9rem' }}>
-                      {futureOffers.map(offer => {
-                        const secondsLeft = Math.max(0, Math.ceil((offer.expiresAt - now) / 1000));
-                        const pickupDate = new Date(offer.pickupTime);
-                        const pickupZone = findZone(offer.pickupLat, offer.pickupLng);
-                        const dropoffZone = findZone(offer.dropoffLat, offer.dropoffLng);
-                        const runningRoute = offerRoutes[offer.jobId];
-                        return (
-                          <div key={offer.jobId} className="card" style={{ border: '2px solid var(--gold)', borderRadius: 18, padding: '1rem', background: 'linear-gradient(135deg, #15130b, #090909)', marginBottom: '0.75rem' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
-                              <span style={{ fontWeight: 800, textTransform: 'uppercase', color: 'var(--gold)' }}>Future offer · Grade {offer.letter || '—'}</span>
-                              <span style={{ fontSize: '0.75rem', fontWeight: 800, color: secondsLeft < 15 ? '#ff9d9d' : 'var(--gold)' }}>{secondsLeft}s left</span>
-                            </div>
-                            <div style={{ fontSize: '0.85rem', color: 'var(--cream)', marginBottom: '0.4rem' }}>{offer.pickupAddress} → {offer.dropoffAddress}</div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: '0.75rem' }}>
-                              <div style={{ padding: '0.5rem', border: '1.5px solid var(--border-strong)', borderRadius: 10, background: 'rgba(0,0,0,0.25)' }}>
-                                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Fare</div>
-                                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', color: 'var(--gold)' }}>{formatCurrency(offer.fare)}</div>
-                              </div>
-                              <div style={{ padding: '0.5rem', border: '1.5px solid var(--border-strong)', borderRadius: 10, background: 'rgba(0,0,0,0.25)' }}>
-                                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Pickup</div>
-                                <div style={{ fontSize: '0.85rem', color: 'var(--cream)' }}>{pickupDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
-                              </div>
-                              <div style={{ padding: '0.5rem', border: '1.5px solid var(--border-strong)', borderRadius: 10, background: 'rgba(0,0,0,0.25)' }}>
-                                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Running</div>
-                                <div style={{ fontSize: '0.85rem', color: 'var(--cream)' }}>{runningRoute ? `${runningRoute.miles.toFixed(1)} mi · ${runningRoute.durationText}` : 'Calculating…'}</div>
-                              </div>
-                              <div style={{ padding: '0.5rem', border: '1.5px solid var(--border-strong)', borderRadius: 10, background: 'rgba(0,0,0,0.25)' }}>
-                                <div style={{ fontSize: '0.6rem', color: 'var(--cream-dim)', fontWeight: 800, textTransform: 'uppercase' }}>Vehicle</div>
-                                <div style={{ fontSize: '0.85rem', color: 'var(--cream)' }}>{offer.vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</div>
-                              </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: '0.5rem' }}>
-                              <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => acceptFutureOffer(offer.jobId)} disabled={loading}>Accept</button>
-                              <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => declineFutureOffer(offer.jobId)} disabled={loading}>Decline</button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <div className="wj-future-hero"><img src={logo} alt="The Wirral Jobe" /><div><h3>Future work</h3><p>Here is work coming up over the next few days. Want it in your diary?</p></div></div>
 
                   <div className="wj-future-tabs">
-                    <button className={futureTab === 'upcoming' ? 'active' : ''} onClick={() => setFutureTab('upcoming')}>Upcoming</button>
-                    <button className={futureTab === 'offered' ? 'active' : ''} onClick={() => setFutureTab('offered')}>Offered to me</button>
-                    <button className={futureTab === 'all' ? 'active' : ''} onClick={() => setFutureTab('all')}>All</button>
+                    <button className={futureTab === 'available' ? 'active' : ''} onClick={() => setFutureTab('available')}>Available</button>
+                    <button className={futureTab === 'mine' ? 'active' : ''} onClick={() => setFutureTab('mine')}>My requests</button>
                   </div>
                   {(() => {
                     const shownBookings = futureBookings.filter(job => {
-                      if (futureTab === 'upcoming') return job.driverId === driverId && job.status !== 'SCHEDULED';
-                      if (futureTab === 'offered') return !job.driverId || (job.driverId === driverId && job.status === 'SCHEDULED');
-                      return true;
+                      if (futureTab === 'mine') return job.requested || job.assignedToMe;
+                      return !job.assignedToMe;
                     });
-                    if (shownBookings.length === 0) return <p className="wj-future-empty">{futureTab === 'offered' ? 'No future offers available right now.' : 'No future bookings available right now.'}</p>;
+                    if (shownBookings.length === 0) return <p className="wj-future-empty">{futureTab === 'mine' ? "You haven't requested any future work yet." : 'No future work available right now.'}</p>;
                     let lastDate = '';
                     return shownBookings.map(job => {
-                      const pickupZone = findZone(job.pickupLat, job.pickupLng);
-                      const dropoffZone = findZone(job.dropoffLat, job.dropoffLng);
-                      const runningRoute = offerRoutes[job.jobId];
-                      const fareMiles = Number(job.miles);
                       const date = new Date(job.pickupTime);
-                      const accepted = job.driverId === driverId;
-                      const dispatched = accepted && job.status !== 'SCHEDULED';
-                      const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' });
+                      const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'long' });
                       const showDate = dateLabel !== lastDate;
                       lastDate = dateLabel;
+                      const requested = job.requested;
+                      const assigned = job.assignedToMe;
+                      const otherRequests = Math.max(0, (job.requestCount || 0) - (requested ? 1 : 0));
                       return <div key={job.jobId}>{showDate && <div className="wj-future-date">{dateLabel}</div>}<article className="wj-future-card">
-                        <div className={`wj-future-status ${accepted ? 'accepted' : ''}`}>{accepted ? (dispatched ? 'Assigned to you' : 'Accepted — awaiting dispatch') : 'Future offer'}</div>
-                        <div className="wj-future-time"><span>{date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span><div><strong>{job.dropoffAddress}</strong><small>from {job.pickupAddress}</small></div></div>
-                        <div className="wj-future-details-grid">
-                          <div><span>●</span><p>Running distance<strong>{runningRoute ? `${runningRoute.miles.toFixed(1)} mi` : 'Calculating…'}</strong><small>{runningRoute?.durationText || 'Road route to pickup'}</small></p></div>
-                          <div><span>╱</span><p>Fare distance<strong>{fareMiles.toFixed(1)} mi</strong><small>Estimated journey distance</small></p></div>
-                          <div><span>↑</span><p>Pickup zone<strong>{pickupZone ? getZoneName(pickupZone.properties.zoneId) : '—'}</strong><small>{job.pickupAddress}</small></p></div>
-                          <div><span>↓</span><p>Destination zone<strong>{dropoffZone ? getZoneName(dropoffZone.properties.zoneId) : '—'}</strong><small>{job.dropoffAddress}</small></p></div>
-                          <div><span>£</span><p>Maximum fare amount<strong>{formatCurrency(job.fare)}</strong><small>This is the most we can charge</small></p></div>
-                        </div>
-                        {accepted ? (
+                        <div className="wj-future-time"><span>{date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span><div><strong>{job.pickupAddress} → {job.dropoffAddress}</strong><small>{formatCurrency(job.fare)} · {job.vehicleType === 'mpv' ? 'MPV' : 'Saloon/estate'}</small></div></div>
+                        {assigned ? (
                           <div className="wj-future-actions">
-                            <span className="wj-future-accepted">{dispatched ? 'Assigned to you' : 'Accepted — awaiting dispatch'}</span>
-                            {!dispatched && <button onClick={() => releaseFutureBooking(job.jobId)} disabled={loading}>Release</button>}
+                            <span className="wj-future-accepted" style={{ color: 'var(--green)' }}>✓ Assigned to you</span>
+                            {job.status === 'SCHEDULED' && <button onClick={() => releaseFutureBooking(job.jobId)} disabled={loading}>Release</button>}
                           </div>
-                        ) : <div className="wj-future-actions"><button onClick={() => acceptFutureBooking(job.jobId)} disabled={loading}>Accept offer</button><button onClick={() => setFutureBookings(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading}>Pass</button></div>}
+                        ) : requested ? (
+                          <div className="wj-future-actions">
+                            <span className="wj-future-accepted">✓ You've requested this booking{otherRequests > 0 ? ` (${otherRequests} other driver${otherRequests === 1 ? '' : 's'} also requested)` : ''}. We'll let you know when it's allocated.</span>
+                          </div>
+                        ) : (
+                          <div className="wj-future-actions"><button onClick={() => requestFutureBooking(job.jobId)} disabled={loading}>Request job</button><button className="btn btn-outline" onClick={() => setFutureBookings(current => current.filter(item => item.jobId !== job.jobId))} disabled={loading}>Pass</button></div>
+                        )}
                       </article></div>;
                     });
                   })()}
-                  <div className="wj-future-footer"><span>◉<b>Local drivers</b><small>Supporting local communities</small></span><span>£<b>Fair prices</b><small>Transparent fares, no hidden fees</small></span><span>▣<b>Future work</b><small>Plan ahead and keep moving forward</small></span></div>
                 </div>
               )}
             </div>
@@ -1641,8 +1562,8 @@ function DriverPageContent() {
               <button className="btn btn-outline btn-sm" onClick={() => { setOpenPanel(null); setFollowMe(true); setMapMode('route'); }}>Route map</button>
               <button className="btn btn-outline btn-sm" onClick={() => { setOpenPanel(null); recenterMap(); }}>Re-centre map</button>
               <button className="btn btn-outline btn-sm" onClick={() => { loadDashboard(); setOpenPanel(null); }}>Refresh jobs</button>
-              <button className="btn btn-outline btn-sm" onClick={() => setOpenPanel('bids')}>Open bids ({bidBoard.length})</button>
-              <button className="btn btn-outline btn-sm" onClick={() => setOpenPanel('future')}>Future jobs ({futureOffers.length})</button>
+              <button className="btn btn-outline btn-sm" onClick={() => setOpenPanel('bids')}>Open live jobs ({bidBoard.length})</button>
+              <button className="btn btn-outline btn-sm" onClick={() => setOpenPanel('future')}>Future work ({futureBookings.length})</button>
               <button className="btn btn-outline btn-sm" onClick={() => {
                 setMapTheme(theme => {
                   const next = theme === 'dark' ? 'light' : 'dark';
@@ -1684,8 +1605,8 @@ function DriverPageContent() {
           </div>
 
           <div style={{ marginBottom: '1rem' }}>
-            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>Open bids ({zonePanelInfo.bids.length})</div>
-            {zonePanelInfo.bids.length === 0 && <p style={{ color: 'var(--cream-dim)', fontSize: '0.85rem', margin: 0 }}>No open bids in this zone.</p>}
+            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>Open live jobs ({zonePanelInfo.bids.length})</div>
+            {zonePanelInfo.bids.length === 0 && <p style={{ color: 'var(--cream-dim)', fontSize: '0.85rem', margin: 0 }}>No open live jobs in this zone.</p>}
             {zonePanelInfo.bids.map(job => (
               <div key={job.jobId} className="card" style={{ padding: '0.7rem', fontSize: '0.85rem' }}>
                 <div style={{ fontWeight: 700 }}>{formatCurrency(job.fare)} · {job.vehicleType?.toUpperCase()}</div>
@@ -1695,8 +1616,8 @@ function DriverPageContent() {
           </div>
 
           <div>
-            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>Future bookings ({zonePanelInfo.futures.length})</div>
-            {zonePanelInfo.futures.length === 0 && <p style={{ color: 'var(--cream-dim)', fontSize: '0.85rem', margin: 0 }}>No future bookings in this zone.</p>}
+            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>Future work ({zonePanelInfo.futures.length})</div>
+            {zonePanelInfo.futures.length === 0 && <p style={{ color: 'var(--cream-dim)', fontSize: '0.85rem', margin: 0 }}>No future work in this zone.</p>}
             {zonePanelInfo.futures.map(job => (
               <div key={job.jobId} className="card" style={{ padding: '0.7rem', fontSize: '0.85rem' }}>
                 <div style={{ fontWeight: 700 }}>{new Date(job.pickupTime).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}</div>

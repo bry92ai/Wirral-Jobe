@@ -73,7 +73,12 @@ function addRouteLayer(map, route) {
   }
 }
 
-export default function DriverNavigationMap({ myLocation, heading, activeJob, theme, follow, onFollowChange, onRouteInfo }) {
+function interpolateHeading(from, to, progress) {
+  const delta = ((to - from + 540) % 360) - 180;
+  return from + delta * progress;
+}
+
+export default function DriverNavigationMap({ myLocation, heading, activeJob, theme, follow, onFollowChange, onRouteInfo, onNavigationProblem, retryKey }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const driverMarkerRef = useRef(null);
@@ -81,9 +86,15 @@ export default function DriverNavigationMap({ myLocation, heading, activeJob, th
   const routeRef = useRef(null);
   const lastRouteFetchRef = useRef(0);
   const routeTargetKeyRef = useRef('');
+  const retryKeyRef = useRef(retryKey);
+  const routeRequestRef = useRef(0);
   const displayedLocationRef = useRef(null);
   const displayedHeadingRef = useRef(null);
+  const samplesRef = useRef([]);
   const animationRef = useRef(null);
+  const followRef = useRef(follow);
+
+  useEffect(() => { followRef.current = follow; }, [follow]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current || !ACCESS_TOKEN) return;
@@ -117,54 +128,74 @@ export default function DriverNavigationMap({ myLocation, heading, activeJob, th
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    map.setStyle(`mapbox://styles/mapbox/${theme === 'dark' ? 'navigation-night-v1' : 'outdoors-v12'}`);
+    map.setStyle(`mapbox://styles/mapbox/${theme === 'dark' ? 'navigation-night-v1' : 'navigation-day-v1'}`);
   }, [theme]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !myLocation) return;
+    const sample = { ...myLocation, heading: Number.isFinite(heading) ? heading : (displayedHeadingRef.current ?? 0), time: Date.now() };
+    const previous = samplesRef.current[samplesRef.current.length - 1];
+    if (!previous || previous.lat !== sample.lat || previous.lng !== sample.lng || previous.heading !== sample.heading) {
+      samplesRef.current = [...samplesRef.current.slice(-7), sample];
+    }
     if (!driverMarkerRef.current) {
       const element = document.createElement('div');
       element.className = 'wj-navigation-taxi';
       element.innerHTML = `<div class="wj-navigation-taxi-icon"><img src="${taxiMarker}" alt="" style="width:44px;height:44px;display:block;" /></div>`;
-      driverMarkerRef.current = new mapboxgl.Marker({ element, rotationAlignment: 'viewport' }).setLngLat([myLocation.lng, myLocation.lat]).addTo(map);
-      displayedLocationRef.current = myLocation;
-      displayedHeadingRef.current = Number.isFinite(heading) ? heading : 0;
+      driverMarkerRef.current = new mapboxgl.Marker({ element, rotationAlignment: 'viewport' }).setLngLat([sample.lng, sample.lat]).addTo(map);
+      displayedLocationRef.current = sample;
+      displayedHeadingRef.current = sample.heading;
     }
+  }, [myLocation, heading]);
 
-    if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    const startLocation = displayedLocationRef.current || myLocation;
-    const startHeading = displayedHeadingRef.current ?? (Number.isFinite(heading) ? heading : 0);
-    const targetHeading = Number.isFinite(heading) ? heading : startHeading;
-    const headingDelta = ((targetHeading - startHeading + 540) % 360) - 180;
-    const startedAt = performance.now();
-    const duration = 150;
-
-    const animate = now => {
-      const progress = Math.min(1, (now - startedAt) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const location = {
-        lat: startLocation.lat + (myLocation.lat - startLocation.lat) * eased,
-        lng: startLocation.lng + (myLocation.lng - startLocation.lng) * eased
-      };
-      const currentHeading = startHeading + headingDelta * eased;
-      driverMarkerRef.current?.setLngLat([location.lng, location.lat]);
-      const icon = driverMarkerRef.current?.getElement().querySelector('.wj-navigation-taxi-icon');
-      if (icon) icon.style.transform = `rotate(${currentHeading - map.getBearing()}deg)`;
-      if (follow) map.easeTo({ center: [location.lng, location.lat], zoom: Math.max(map.getZoom(), 18.5), bearing: currentHeading, pitch: 62, offset: [0, 190], duration, essential: true });
-      displayedLocationRef.current = location;
-      displayedHeadingRef.current = currentHeading;
-      if (progress < 1) animationRef.current = requestAnimationFrame(animate);
+  useEffect(() => {
+    if (!myLocation || animationRef.current) return;
+    const render = () => {
+      const map = mapRef.current;
+      const samples = samplesRef.current;
+      if (map && driverMarkerRef.current && samples.length) {
+        const displayTime = Date.now() - 1000;
+        let from = samples[0];
+        let to = samples[samples.length - 1];
+        for (let index = 1; index < samples.length; index += 1) {
+          if (samples[index].time >= displayTime) { from = samples[index - 1]; to = samples[index]; break; }
+          from = samples[index];
+        }
+        const span = Math.max(1, to.time - from.time);
+        const progress = Math.max(0, Math.min(1, (displayTime - from.time) / span));
+        const location = { lat: from.lat + (to.lat - from.lat) * progress, lng: from.lng + (to.lng - from.lng) * progress };
+        const currentHeading = interpolateHeading(from.heading, to.heading, progress);
+        driverMarkerRef.current.setLngLat([location.lng, location.lat]);
+        const icon = driverMarkerRef.current.getElement().querySelector('.wj-navigation-taxi-icon');
+        if (icon) icon.style.transform = `rotate(${currentHeading - map.getBearing()}deg)`;
+        if (followRef.current) map.jumpTo({ center: [location.lng, location.lat], zoom: Math.max(map.getZoom(), 18.5), bearing: currentHeading, pitch: 62, offset: [0, 190] });
+        displayedLocationRef.current = location;
+        displayedHeadingRef.current = currentHeading;
+        samplesRef.current = samples.filter((sample, index) => index === samples.length - 1 || sample.time >= displayTime - 5000);
+      }
+      animationRef.current = requestAnimationFrame(render);
     };
-    animationRef.current = requestAnimationFrame(animate);
-    return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
-  }, [myLocation, heading, follow]);
+    animationRef.current = requestAnimationFrame(render);
+    return () => { cancelAnimationFrame(animationRef.current); animationRef.current = null; };
+  }, [Boolean(myLocation)]);
 
   useEffect(() => {
     const map = mapRef.current;
     const target = routeTarget(activeJob);
     if (!map) return;
-    if (!myLocation || !target || !Number.isFinite(target.lat) || !Number.isFinite(target.lng)) {
+    if (!myLocation) {
+      const warningTimer = window.setTimeout(() => onNavigationProblem?.({ title: 'Driver location unavailable', message: 'We still can’t get a GPS position. Check location services or refresh your location.', action: 'location' }), 10000);
+      routeRef.current = null;
+      routeTargetKeyRef.current = '';
+      if (map.isStyleLoaded()) clearRouteLayer(map);
+      if (targetMarkerRef.current) { targetMarkerRef.current.remove(); targetMarkerRef.current = null; }
+      onRouteInfo(null);
+      return () => window.clearTimeout(warningTimer);
+    }
+    if (!target || !Number.isFinite(target.lat) || !Number.isFinite(target.lng)) {
+      if (!target) onNavigationProblem?.(null);
+      else onNavigationProblem?.({ title: 'Can’t start navigation', message: `The ${target.label.toLowerCase()} pin appears to be invalid or missing.`, action: 'external' });
       routeRef.current = null;
       routeTargetKeyRef.current = '';
       if (map.isStyleLoaded()) clearRouteLayer(map);
@@ -185,18 +216,26 @@ export default function DriverNavigationMap({ myLocation, heading, activeJob, th
       element.className = 'wj-navigation-target';
       targetMarkerRef.current = new mapboxgl.Marker({ element }).setLngLat([target.lng, target.lat]).addTo(map);
     } else targetMarkerRef.current.setLngLat([target.lng, target.lat]);
+    if (retryKeyRef.current !== retryKey) {
+      retryKeyRef.current = retryKey;
+      lastRouteFetchRef.current = 0;
+    }
     const now = Date.now();
-    if (now - lastRouteFetchRef.current < 8000) return;
+    if (now - lastRouteFetchRef.current < 4000) return;
     lastRouteFetchRef.current = now;
-    let cancelled = false;
+    const requestedTargetKey = targetKey;
+    const requestId = ++routeRequestRef.current;
     fetchRoute(myLocation, target).then(route => {
-      if (cancelled) return;
+      if (routeTargetKeyRef.current !== requestedTargetKey || routeRequestRef.current !== requestId) return;
       routeRef.current = route;
       addRouteLayer(map, route);
-      onRouteInfo({ ...route, targetLabel: target.label, targetAddress: target.address });
-    }).catch(() => { if (!cancelled) onRouteInfo(null); });
-    return () => { cancelled = true; };
-  }, [myLocation?.lat, myLocation?.lng, activeJob?.status, activeJob?.pickupLat, activeJob?.pickupLng, activeJob?.dropoffLat, activeJob?.dropoffLng, onRouteInfo]);
+      onRouteInfo({ ...route, targetLabel: target.label, targetAddress: target.address, updatedAt: Date.now() });
+      onNavigationProblem?.(null);
+    }).catch(() => {
+      if (routeTargetKeyRef.current !== requestedTargetKey || routeRequestRef.current !== requestId) return;
+      onNavigationProblem?.({ title: 'Route unavailable', message: `We couldn’t generate a road route to the ${target.label.toLowerCase()}.`, action: 'retry' });
+    });
+  }, [myLocation?.lat, myLocation?.lng, activeJob?.status, activeJob?.pickupLat, activeJob?.pickupLng, activeJob?.dropoffLat, activeJob?.dropoffLng, retryKey, onRouteInfo]);
 
   if (!ACCESS_TOKEN) return <div className="error">Mapbox access token is missing.</div>;
   return <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />;
